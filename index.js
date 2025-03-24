@@ -282,4 +282,97 @@ bot.on("text", async (ctx) => {
       return ctx.reply("❌ Failed to fetch video. Please check the link.");
     }
 
-    const downloadUrl = response.data.data
+    const downloadUrl = response.data.data.direct_link;
+    const fileName = response.data.data.name || `terabox_${videoId}`;
+    const fileInfo = response.data.data;
+
+    // Update status message
+    await safeEditMessage(ctx, processingMsg.message_id, "🔄 Sending video...");
+
+    // Send the file directly from the URL as a document
+    try {
+      const fileOptions = {
+        caption: `📁 ${fileName}\n\nDownloaded via @TeraBoxDLBot`,
+      };
+
+      // Check file size to determine sending method
+      const fileSizeMB = fileInfo.size ? (fileInfo.size / (1024 * 1024)).toFixed(2) : 0;
+
+      if (fileSizeMB > 50) {
+        // For large files, send as URL
+        await ctx.reply(
+          `📁 *${fileName}*\n\n💾 Size: ${fileSizeMB} MB\n\n⬇️ Download Link:\n${downloadUrl}\n\nLink valid for 4 hours.`,
+          { parse_mode: "Markdown" }
+        );
+      } else {
+        // For smaller files, try to send directly
+        await ctx.replyWithDocument({
+          url: downloadUrl,
+          filename: fileName
+        }, fileOptions);
+        
+        // Forward to bump channel if enabled
+        if (autoForwarding) {
+          try {
+            // Get the document we just sent
+            const sentMsg = ctx.message.reply_to_message || ctx.message;
+            if (sentMsg.document) {
+              await forwardToBumpChannel(ctx, sentMsg.document.file_id, fileOptions.caption, 'document');
+            }
+          } catch (fwdError) {
+            console.error("Error in auto-forwarding:", fwdError.message);
+          }
+        }
+      }
+
+      await safeDeleteMessage(ctx, processingMsg.message_id);
+    } catch (sendError) {
+      console.error("Error sending file:", sendError);
+      await safeDeleteMessage(ctx, processingMsg.message_id);
+      
+      // Fallback to just sending the link
+      await ctx.reply(
+        `❌ Could not send file directly.\n\n📁 *${fileName}*\n\n⬇️ Download Link:\n${downloadUrl}\n\nLink valid for 4 hours.`,
+        { parse_mode: "Markdown" }
+      );
+    }
+  } catch (error) {
+    console.error("Error processing TeraBox link:", error);
+    await safeDeleteMessage(ctx, processingMsg.message_id);
+    await ctx.reply("❌ Failed to process the link. Please try again later.");
+  }
+});
+
+// Initialize the bot
+async function startBot() {
+  console.log("🤖 Starting TeraBox Downloader Bot...");
+
+  // Connect to MongoDB first
+  const connected = await connectToMongo();
+  if (!connected) {
+    console.error("❌ Failed to connect to MongoDB. Exiting...");
+    process.exit(1);
+  }
+
+  // Set up graceful shutdown
+  setupGracefulShutdown();
+
+  // Start the bot
+  await bot.launch().then(() => {
+    console.log("🤖 Bot started successfully!");
+  }).catch(err => {
+    console.error("❌ Failed to start bot:", err.message);
+    process.exit(1);
+  });
+
+  // Start Express server
+  app.listen(PORT, () => {
+    console.log(`🌐 Express server running on port ${PORT}`);
+  });
+}
+
+// Start the bot
+startBot().catch(console.error);
+
+// Export app for potential serverless deployment
+module.exports = app;
