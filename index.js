@@ -6,9 +6,9 @@ const { MongoClient } = require("mongodb");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BASE_URL = "https://alphaapis.org/terabox";
-const CHANNEL_USERNAME = "@awt_bots";
+const CHANNEL_USERNAME = "@terao2";
 // Define the bump channel ID/username where files will be transferred
-const BUMP_CHANNEL = ""; // Replace with your channel username or ID
+const BUMP_CHANNEL = "-1002146782406"; // Replace with your channel username or ID
 const MONGO_URI = process.env.MONGO_URI;
 
 const client = new MongoClient(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
