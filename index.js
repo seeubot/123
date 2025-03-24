@@ -7,6 +7,8 @@ const { MongoClient } = require("mongodb");
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BASE_URL = "https://alphaapis.org/terabox";
 const CHANNEL_USERNAME = "@terao2";
+// Add dump channel ID - this should be the channel's username or ID
+const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID || "@your_dump_channel";
 const MONGO_URI = process.env.MONGO_URI;
 
 const client = new MongoClient(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
@@ -42,7 +44,7 @@ bot.start((ctx) => ctx.reply("Send me a TeraBox link or Video ID, and I'll downl
 bot.on("text", async (ctx) => {
     const userId = ctx.from.id;
     if (!(await isUserMember(userId))) {
-        return ctx.reply(`❌ You must join ${CHANNEL_USERNAME} to use this bot.`);
+        return ctx.reply(❌ You must join ${CHANNEL_USERNAME} to use this bot.);
     }
     await saveUser(userId);
 
@@ -57,7 +59,7 @@ bot.on("text", async (ctx) => {
     const processingMsg = await ctx.reply("⏳ Fetching video link...");
 
     try {
-        const response = await axios.get(`${BASE_URL}?id=${videoId}`);
+        const response = await axios.get(${BASE_URL}?id=${videoId});
         console.log("API Response:", response.data);
 
         if (!response.data || response.data.success !== true) {
@@ -75,7 +77,7 @@ bot.on("text", async (ctx) => {
         }
 
         if (fileSize > 50000000) {
-            return ctx.reply(`🚨 Video is too large for Telegram! Download manually: ${downloadUrl}`);
+            return ctx.reply(🚨 Video is too large for Telegram! Download manually: ${downloadUrl});
         }
 
         const progressMessage = await ctx.reply("✅ Video found! 🔄 Downloading (0%)...");
@@ -102,7 +104,7 @@ bot.on("text", async (ctx) => {
                         ctx.chat.id,
                         progressMessage.message_id,
                         null,
-                        `✅ Video found! 🔄 Downloading (${progress}%)...`
+                        ✅ Video found! 🔄 Downloading (${progress}%)...
                     );
                 } catch (error) {
                     console.error("Failed to update message:", error.message);
@@ -112,15 +114,34 @@ bot.on("text", async (ctx) => {
 
         videoResponse.data.pipe(writer);
 
-        writer.on("finish", async () => {
-            console.log(`✅ Video saved as: ${fileName}`);
+writer.on("finish", async () => {
+            console.log(✅ Video saved as: ${fileName});
             await ctx.telegram.editMessageText(
                 ctx.chat.id,
                 progressMessage.message_id,
                 null,
                 "✅ Download complete! Sending video..."
             );
-            await ctx.replyWithVideo({ source: fileName });
+            
+            // Send to user
+            const sentMessage = await ctx.replyWithVideo({ source: fileName });
+            
+            // Send to dump channel
+            try {
+                // Get the original file ID from the sent message
+                const fileId = sentMessage.video.file_id;
+                
+                // Prepare caption with user info
+                const caption = File: ${fileName}\nRequested by: @${ctx.from.username || 'Unknown'} (ID: ${userId})\nOriginal link: ${text};
+                
+                // Send to dump channel using the file_id (more efficient than re-uploading)
+                await bot.telegram.sendVideo(DUMP_CHANNEL_ID, fileId, { caption });
+                console.log(✅ Video forwarded to dump channel: ${DUMP_CHANNEL_ID});
+            } catch (error) {
+                console.error("Error forwarding to dump channel:", error.message);
+            }
+            
+            // Clean up
             fs.unlinkSync(fileName);
             await ctx.telegram.deleteMessage(ctx.chat.id, progressMessage.message_id);
             await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
@@ -137,4 +158,8 @@ bot.on("text", async (ctx) => {
 });
 
 bot.launch();
-console.log("🚀 TeraBox Video Bot is running...");
+console.log("🚀 TeraBox Video Bot is running with dump channel functionality...");
+
+// Enable graceful stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
