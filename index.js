@@ -4,6 +4,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { MongoClient } = require("mongodb");
+const express = require("express"); // Add Express
 
 // Check for required environment variables
 if (!process.env.BOT_TOKEN) {
@@ -15,6 +16,15 @@ if (!process.env.MONGO_URI) {
   console.error("❌ Missing MONGO_URI environment variable");
   process.exit(1);
 }
+
+// Initialize Express server
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Add a simple health check endpoint
+app.get("/", (req, res) => {
+  res.send("TeraBox Bot is running!");
+});
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BASE_URL = "https://alphaapis.org/terabox";
@@ -272,130 +282,4 @@ bot.on("text", async (ctx) => {
       return ctx.reply("❌ Failed to fetch video. Please check the link.");
     }
 
-    const downloadUrl = response.data.data.downloadLink;
-    let fileName = response.data.data.filename || "video.mp4";
-    
-    // Sanitize filename to prevent path traversal
-    fileName = path.basename(fileName);
-    
-    const fileSize = parseInt(response.data.data.size, 10) || 0;
-
-    console.log("Download URL:", downloadUrl);
-
-    if (!downloadUrl) {
-      await safeDeleteMessage(ctx, processingMsg.message_id);
-      return ctx.reply("❌ No download link found.");
-    }
-
-    // Check file size limits
-    const maxSizeBytes = 50 * 1024 * 1024; // 50MB in bytes
-    if (fileSize > maxSizeBytes) {
-      await safeDeleteMessage(ctx, processingMsg.message_id);
-      return ctx.reply(`🚨 Video is too large for Telegram! Download manually: ${downloadUrl}`);
-    }
-
-    const progressMessage = await ctx.reply("✅ Video found! 🔄 Downloading (0%)...");
-    await safeDeleteMessage(ctx, processingMsg.message_id);
-
-    // Download the file with progress tracking
-    const tempFilePath = path.join(__dirname, fileName);
-    try {
-      const videoResponse = await axios({
-        method: "GET",
-        url: downloadUrl,
-        responseType: "stream",
-      });
-
-      const writer = fs.createWriteStream(tempFilePath);
-      let downloadedSize = 0;
-      const totalSize = fileSize;
-
-      let lastProgress = 0;
-      let lastUpdateTime = Date.now();
-      
-      videoResponse.data.on("data", async (chunk) => {
-        downloadedSize += chunk.length;
-        const progress = Math.floor((downloadedSize / totalSize) * 100);
-        const currentTime = Date.now();
-        
-        // Update progress message every 10% or at least 3 seconds apart to avoid Telegram API limits
-        if ((progress >= lastProgress + 10 || currentTime - lastUpdateTime > 3000) && progress < 100) {
-          lastProgress = progress;
-          lastUpdateTime = currentTime;
-          await safeEditMessage(ctx, progressMessage.message_id, `✅ Video found! 🔄 Downloading (${progress}%)...`);
-        }
-      });
-
-      videoResponse.data.pipe(writer);
-
-      // Promise to handle file writing completion
-      const writeComplete = new Promise((resolve, reject) => {
-        writer.on("finish", resolve);
-        writer.on("error", reject);
-      });
-
-      await writeComplete;
-      
-      console.log(`✅ Video saved as: ${tempFilePath}`);
-      await safeEditMessage(ctx, progressMessage.message_id, "✅ Download complete! Sending video...");
-      
-      // Send the video to the user
-      const sentVideo = await ctx.replyWithVideo({ source: tempFilePath });
-      
-      // Forward to bump channel automatically if enabled
-      if (autoForwarding) {
-        try {
-          await forwardToBumpChannel(
-            ctx, 
-            sentVideo.video.file_id, 
-            `TeraBox Video: ${fileName}\nDownloaded by: @${ctx.from.username || ctx.from.id}`
-          );
-          
-          // Inform the user that video was forwarded to channel
-          await ctx.reply("📤 Video has been shared to our channel automatically!");
-        } catch (error) {
-          console.error("Error forwarding to channel:", error.message);
-          // Don't notify user about channel forwarding failure
-        }
-      }
-      
-      // Clean up
-      await safeDeleteFile(tempFilePath);
-      await safeDeleteMessage(ctx, progressMessage.message_id);
-      
-    } catch (downloadError) {
-      console.error("Error downloading video:", downloadError.message);
-      await safeDeleteMessage(ctx, progressMessage.message_id);
-      await safeDeleteFile(tempFilePath);
-      return ctx.reply("❌ Error downloading video. Please try again later.");
-    }
-    
-  } catch (error) {
-    console.error("Error fetching Terabox video:", error.message);
-    await safeDeleteMessage(ctx, processingMsg.message_id);
-    ctx.reply("❌ Something went wrong. Try again later.");
-  }
-});
-
-// Main function to start the bot
-async function startBot() {
-  // Connect to MongoDB first
-  const connected = await connectToMongo();
-  if (!connected) {
-    console.error("❌ Failed to connect to MongoDB. Exiting...");
-    process.exit(1);
-  }
-  
-  // Set up graceful shutdown handlers
-  setupGracefulShutdown();
-  
-  // Start the bot
-  await bot.launch();
-  console.log("🚀 TeraBox Video Bot is running...");
-}
-
-// Start the bot
-startBot().catch(err => {
-  console.error("❌ Failed to start bot:", err);
-  process.exit(1);
-});
+    const downloadUrl = response.data.data
