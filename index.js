@@ -3,12 +3,17 @@ const { Telegraf } = require("telegraf");
 const axios = require("axios");
 const fs = require("fs");
 const { MongoClient } = require("mongodb");
+const express = require("express");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const BASE_URL = "https://alphaapis.org/terabox";
 const CHANNEL_USERNAME = "@terao2";
-const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID; // Add this to your .env file
+const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID;
 const MONGO_URI = process.env.MONGO_URI;
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // e.g., https://yourdomain.com/webhook
 
 const client = new MongoClient(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 let usersCollection;
@@ -270,12 +275,45 @@ bot.catch((err, ctx) => {
     ctx.reply("❌ An unexpected error occurred. Please try again later.");
 });
 
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-bot.launch().then(() => {
-    console.log("🚀 TeraBox Video Bot is running...");
-}).catch(err => {
-    console.error("Failed to start bot:", err);
+// Webhook route
+app.use(express.json());
+app.post('/webhook', (req, res) => {
+    bot.handleUpdate(req.body, res);
 });
+
+// Healthcheck route
+app.get('/', (req, res) => {
+    res.send('TeraBox Telegram Bot is running');
+});
+
+// Start the server
+app.listen(PORT, async () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    
+    // Set up webhook if URL is configured
+    if (WEBHOOK_URL) {
+        try {
+            await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+            console.log(`✅ Webhook set to: ${WEBHOOK_URL}/webhook`);
+        } catch (error) {
+            console.error("Failed to set webhook:", error.message);
+        }
+    } else {
+        console.warn("⚠️ WEBHOOK_URL not configured. Bot will run without webhook.");
+    }
+});
+
+// Graceful shutdown
+const closeConnections = async () => {
+    try {
+        await client.close();
+        console.log("MongoDB connection closed");
+        process.exit(0);
+    } catch (error) {
+        console.error("Error closing connections:", error);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', closeConnections);
+process.on('SIGTERM', closeConnections);
