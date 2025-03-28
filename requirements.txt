@@ -1,16 +1,6 @@
-# Telegram Bot Libraries
-pyTelegramBotAPI==20.3
 python-telegram-bot==20.3
-telethon==1.29.2
-
-# Dependencies
 python-dotenv
 requests
-flask
-waitress
 urllib3
-
-# Additional supporting libraries
-cryptography
-pyOpenSSL
-certifi
+waitress
+flask
