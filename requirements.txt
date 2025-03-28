@@ -4,3 +4,7 @@ requests
 urllib3
 waitress
 flask
+requests
+python-telegram-bot
+python-dotenv
+urllib3
