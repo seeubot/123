@@ -11,7 +11,7 @@ import urllib3
 
 # Use environment variables for configuration
 PORT = int(os.getenv('PORT', 5000))
-HOST = os.getenv('HOST', '0.0.0.0')
+HOST = os.getenv('HOST', 'https://one23-p9z6.onrender.com')
 
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
