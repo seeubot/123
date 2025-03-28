@@ -1,23 +1,18 @@
 {
-  "name": "nodejs",
+  "name": "terabox-downloader-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Telegram bot for downloading Terabox files",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "@types/node": "^18.0.6",
-    "axios": "^1.8.3",
-    "dotenv": "^16.4.7",
-    "express": "^4.19.2",
-    "mongodb": "^6.15.0",
-    "mongoose": "^8.12.1",
-    "node-schedule": "^2.1.1",
-    "node-telegram-bot-api": "^0.66.0",
-    "telegraf": "^4.16.3"
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
