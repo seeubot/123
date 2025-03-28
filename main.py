@@ -1,35 +1,36 @@
 #!/usr/bin/env python3
 import sys
 import os
+import subprocess
 
-# Ensure critical libraries are available
-try:
-    import logging
-    import urllib.parse
-    import tempfile
-except ImportError as e:
-    print(f"Critical import error: {e}")
-    sys.exit(1)
-
-# Dynamic import handling for potentially missing libraries
-def safe_import(module_name):
+# Function to install missing dependencies
+def install_dependencies():
     """
-    Safely import a module with informative error handling
+    Install required Python packages using pip
     """
-    try:
-        return __import__(module_name)
-    except ImportError:
-        print(f"Error: {module_name} is not installed. Please install it using pip.")
-        sys.exit(1)
+    dependencies = [
+        'requests', 
+        'pyTelegramBotAPI', 
+        'python-dotenv'
+    ]
+    
+    for package in dependencies:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
+            print(f"Successfully installed {package}")
+        except subprocess.CalledProcessError:
+            print(f"Failed to install {package}")
+            sys.exit(1)
 
-# Import libraries with error handling
-try:
-    requests = safe_import('requests')
-    telebot = safe_import('telebot')
-    dotenv = safe_import('dotenv')
-except Exception as e:
-    print(f"Import error: {e}")
-    sys.exit(1)
+# Install dependencies before importing
+install_dependencies()
+
+import logging
+import urllib.parse
+import tempfile
+import requests
+import telebot
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 try:
-    dotenv.load_dotenv()
+    load_dotenv()
 except Exception as e:
     logger.error(f"Error loading environment variables: {e}")
     sys.exit(1)
