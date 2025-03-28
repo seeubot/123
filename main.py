@@ -1,12 +1,35 @@
-import os
+#!/usr/bin/env python3
 import sys
-import logging
-import requests
-import urllib.parse
-import telebot
-from telebot import types
-from dotenv import load_dotenv
-import tempfile
+import os
+
+# Ensure critical libraries are available
+try:
+    import logging
+    import urllib.parse
+    import tempfile
+except ImportError as e:
+    print(f"Critical import error: {e}")
+    sys.exit(1)
+
+# Dynamic import handling for potentially missing libraries
+def safe_import(module_name):
+    """
+    Safely import a module with informative error handling
+    """
+    try:
+        return __import__(module_name)
+    except ImportError:
+        print(f"Error: {module_name} is not installed. Please install it using pip.")
+        sys.exit(1)
+
+# Import libraries with error handling
+try:
+    requests = safe_import('requests')
+    telebot = safe_import('telebot')
+    dotenv = safe_import('dotenv')
+except Exception as e:
+    print(f"Import error: {e}")
+    sys.exit(1)
 
 # Configure logging
 logging.basicConfig(
@@ -19,9 +42,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Load environment variables
-load_dotenv()
+try:
+    dotenv.load_dotenv()
+except Exception as e:
+    logger.error(f"Error loading environment variables: {e}")
+    sys.exit(1)
 
-# Get credentials from environment
+# Get credentials from environment with additional error checking
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY')
 
@@ -30,7 +57,7 @@ if not TELEGRAM_BOT_TOKEN:
     logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
     sys.exit(1)
 
-# Initialize Telegram Bot
+# Initialize Telegram Bot with comprehensive error handling
 try:
     bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 except Exception as e:
@@ -59,7 +86,7 @@ def is_valid_terabox_url(url):
 
 def download_and_upload_terabox_file(message):
     """
-    Download Terabox file and upload to Telegram
+    Download Terabox file and upload to Telegram with comprehensive error handling
     """
     terabox_url = message.text.strip()
     
@@ -71,17 +98,39 @@ def download_and_upload_terabox_file(message):
         # URL encode the Terabox URL
         encoded_url = urllib.parse.quote(terabox_url)
         
+        # Validate RapidAPI key
+        if not RAPIDAPI_KEY:
+            error_msg = "❌ RapidAPI Key is missing"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
+            )
+            return
+        
         # RapidAPI request headers
         headers = {
             'x-rapidapi-key': RAPIDAPI_KEY,
             'x-rapidapi-host': RAPIDAPI_HOST
         }
         
-        # Make the API request to get download link
-        response = requests.get(
-            f"{RAPIDAPI_URL}?key=RapidAPI-1903-fast&url={encoded_url}", 
-            headers=headers
-        )
+        # Make the API request to get download link with timeout
+        try:
+            response = requests.get(
+                f"{RAPIDAPI_URL}?key=RapidAPI-1903-fast&url={encoded_url}", 
+                headers=headers,
+                timeout=30
+            )
+        except requests.exceptions.RequestException as req_error:
+            error_msg = f"❌ Network Error: {req_error}"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
+            )
+            return
         
         # Check if request was successful
         if response.status_code != 200:
@@ -94,8 +143,18 @@ def download_and_upload_terabox_file(message):
             )
             return
         
-        # Parse JSON response
-        data = response.json()
+        # Parse JSON response with error handling
+        try:
+            data = response.json()
+        except ValueError:
+            error_msg = "❌ Invalid JSON response from API"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
+            )
+            return
         
         # Check if download link exists
         if 'downloadLink' not in data:
@@ -121,8 +180,18 @@ def download_and_upload_terabox_file(message):
             text="📥 Downloading file..."
         )
         
-        # Download the file
-        file_response = requests.get(download_link, stream=True)
+        # Download the file with error handling and streaming
+        try:
+            file_response = requests.get(download_link, stream=True, timeout=60)
+        except requests.exceptions.RequestException as req_error:
+            error_msg = f"❌ File Download Error: {req_error}"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
+            )
+            return
         
         # Check if file download was successful
         if file_response.status_code != 200:
@@ -136,10 +205,20 @@ def download_and_upload_terabox_file(message):
             return
         
         # Create a temporary file to save the download
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
-            for chunk in file_response.iter_content(chunk_size=8192):
-                temp_file.write(chunk)
-            temp_file_path = temp_file.name
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
+                for chunk in file_response.iter_content(chunk_size=8192):
+                    temp_file.write(chunk)
+                temp_file_path = temp_file.name
+        except Exception as file_error:
+            error_msg = f"❌ File Save Error: {file_error}"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
+            )
+            return
         
         # Update processing message
         bot.edit_message_text(
@@ -148,16 +227,29 @@ def download_and_upload_terabox_file(message):
             text="📤 Uploading file..."
         )
         
-        # Open the file and send it
-        with open(temp_file_path, 'rb') as file:
-            bot.send_document(
-                message.chat.id, 
-                file, 
-                caption=f"📂 {filename}"
+        # Open the file and send it with error handling
+        try:
+            with open(temp_file_path, 'rb') as file:
+                bot.send_document(
+                    message.chat.id, 
+                    file, 
+                    caption=f"📂 {filename}"
+                )
+        except Exception as upload_error:
+            error_msg = f"❌ File Upload Error: {upload_error}"
+            logger.error(error_msg)
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=processing_msg.message_id,
+                text=error_msg
             )
+            return
         
         # Clean up temporary file
-        os.unlink(temp_file_path)
+        try:
+            os.unlink(temp_file_path)
+        except Exception as cleanup_error:
+            logger.warning(f"Could not delete temporary file: {cleanup_error}")
         
         # Delete processing message
         bot.delete_message(
@@ -169,7 +261,7 @@ def download_and_upload_terabox_file(message):
     
     except Exception as e:
         # Handle any unexpected errors
-        error_msg = f"❌ Error: {str(e)}"
+        error_msg = f"❌ Unexpected Error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         bot.edit_message_text(
             chat_id=message.chat.id, 
@@ -205,7 +297,7 @@ def handle_terabox_link(message):
 
 def main():
     """
-    Main bot polling function
+    Main bot polling function with comprehensive error handling
     """
     logger.info("Bot is starting...")
     try:
