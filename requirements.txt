@@ -1,4 +1,6 @@
-telebot
+pyTelegramBotAPI
 python-dotenv
 requests
-pyTelegramBotAPI
+urllib3
+flask
+waitress
