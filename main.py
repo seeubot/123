@@ -1,9 +1,21 @@
 import os
+import sys
 import telebot
 import requests
 import urllib.parse
 from dotenv import load_dotenv
 import tempfile
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -14,15 +26,35 @@ RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY')
 
 # Validate bot token
 if not TELEGRAM_BOT_TOKEN:
-    print("Error: TELEGRAM_BOT_TOKEN not found in environment variables")
-    exit(1)
+    logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
+    sys.exit(1)
 
 # Initialize Telegram Bot
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+try:
+    bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+except Exception as e:
+    logger.error(f"Failed to initialize Telegram Bot: {e}")
+    sys.exit(1)
 
 # RapidAPI Configuration
 RAPIDAPI_HOST = "terabox-downloader-hyper.p.rapidapi.com"
 RAPIDAPI_URL = "https://terabox-downloader-hyper.p.rapidapi.com/api"
+
+# Supported Terabox domains
+SUPPORTED_DOMAINS = [
+    'https://1024terabox.com',
+    'https://terabox.com',
+    'https://www.terabox.com',
+    'https://nd.terabox.com',
+    'https://teraboxapp.com',
+    'https://www.teraboxapp.com'
+]
+
+def is_valid_terabox_url(url):
+    """
+    Check if the URL is from a supported Terabox domain
+    """
+    return any(url.startswith(domain) for domain in SUPPORTED_DOMAINS)
 
 def download_and_upload_terabox_file(message, terabox_url):
     """
@@ -40,6 +72,7 @@ def download_and_upload_terabox_file(message, terabox_url):
     try:
         # Send initial processing message
         processing_msg = bot.reply_to(message, "⏳ Processing your link...")
+        logger.info(f"Processing Terabox URL: {terabox_url}")
         
         # Make the API request to get download link
         response = requests.get(
@@ -49,10 +82,12 @@ def download_and_upload_terabox_file(message, terabox_url):
         
         # Check if request was successful
         if response.status_code != 200:
+            error_msg = f"❌ API Error: {response.status_code} - {response.text}"
+            logger.error(error_msg)
             bot.edit_message_text(
                 chat_id=message.chat.id, 
                 message_id=processing_msg.message_id,
-                text=f"❌ API Error: {response.status_code} - {response.text}"
+                text=error_msg
             )
             return
         
@@ -61,10 +96,12 @@ def download_and_upload_terabox_file(message, terabox_url):
         
         # Check if download link exists
         if 'downloadLink' not in data:
+            error_msg = "❌ No download link found. The file might be private or unavailable."
+            logger.warning(error_msg)
             bot.edit_message_text(
                 chat_id=message.chat.id, 
                 message_id=processing_msg.message_id,
-                text="❌ No download link found. The file might be private or unavailable."
+                text=error_msg
             )
             return
         
@@ -86,10 +123,12 @@ def download_and_upload_terabox_file(message, terabox_url):
         
         # Check if file download was successful
         if file_response.status_code != 200:
+            error_msg = f"❌ File Download Error: {file_response.status_code}"
+            logger.error(error_msg)
             bot.edit_message_text(
                 chat_id=message.chat.id, 
                 message_id=processing_msg.message_id,
-                text=f"❌ File Download Error: {file_response.status_code}"
+                text=error_msg
             )
             return
         
@@ -118,13 +157,17 @@ def download_and_upload_terabox_file(message, terabox_url):
             chat_id=message.chat.id, 
             message_id=processing_msg.message_id
         )
+        
+        logger.info(f"Successfully uploaded file: {filename}")
     
     except Exception as e:
         # Handle any unexpected errors
+        error_msg = f"❌ Error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         bot.edit_message_text(
             chat_id=message.chat.id, 
             message_id=processing_msg.message_id,
-            text=f"❌ Error: {str(e)}"
+            text=error_msg
         )
 
 @bot.message_handler(commands=['start', 'help'])
@@ -138,11 +181,15 @@ def send_welcome(message):
         "Usage:\n"
         "1. Simply send a Terabox sharing link\n"
         "2. I'll download the file and send it to you\n\n"
-        "Supported domains: 1024terabox.com"
+        "Supported domains:\n"
+        "• 1024terabox.com\n"
+        "• terabox.com\n"
+        "• teraboxapp.com\n"
+        "And their variations with 'www' or subdomains"
     )
     bot.reply_to(message, welcome_text)
 
-@bot.message_handler(func=lambda message: message.text.startswith('https://1024terabox.com'))
+@bot.message_handler(func=lambda message: is_valid_terabox_url(message.text.strip()))
 def handle_terabox_link(message):
     """
     Handle Terabox link messages
@@ -154,8 +201,12 @@ def main():
     """
     Main bot polling function
     """
-    print("Bot is running...")
-    bot.polling(none_stop=True)
+    logger.info("Bot is starting...")
+    try:
+        bot.polling(none_stop=True)
+    except Exception as e:
+        logger.error(f"Bot polling failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
