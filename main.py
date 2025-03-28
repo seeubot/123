@@ -4,6 +4,9 @@ import sys
 import venv
 import subprocess
 import platform
+import logging
+import threading
+from flask import Flask, request, Response
 
 def create_venv_and_install_dependencies():
     """
@@ -32,7 +35,9 @@ def create_venv_and_install_dependencies():
     dependencies = [
         'requests', 
         'pyTelegramBotAPI', 
-        'python-dotenv'
+        'python-dotenv',
+        'flask',
+        'gunicorn'
     ]
     
     # Install dependencies in the virtual environment
@@ -54,50 +59,36 @@ def main():
     if venv_python != sys.executable:
         os.execl(venv_python, venv_python, *sys.argv)
     
-    # Rest of your original main script follows...
-    import logging
-    import urllib.parse
-    import tempfile
-    import requests
+    # Rest of the script
     import telebot
     from dotenv import load_dotenv
+    from flask import Flask, request, Response
 
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     logger = logging.getLogger(__name__)
 
     # Load environment variables
-    try:
-        load_dotenv()
-    except Exception as e:
-        logger.error(f"Error loading environment variables: {e}")
-        sys.exit(1)
+    load_dotenv()
 
-    # Get credentials from environment with additional error checking
+    # Get bot token and webhook configurations
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-    RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY')
+    WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', '0.0.0.0')
+    WEBHOOK_PORT = int(os.getenv('WEBHOOK_PORT', 5000))
+    WEBHOOK_LISTEN = os.getenv('WEBHOOK_LISTEN', '/webhook')
 
-    # Validate bot token
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
         sys.exit(1)
 
-    # Initialize Telegram Bot with comprehensive error handling
-    try:
-        bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-    except Exception as e:
-        logger.error(f"Failed to initialize Telegram Bot: {e}")
-        sys.exit(1)
+    # Initialize bot
+    bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-    # RapidAPI Configuration
-    RAPIDAPI_HOST = "terabox-downloader-hyper.p.rapidapi.com"
-    RAPIDAPI_URL = "https://terabox-downloader-hyper.p.rapidapi.com/api"
+    # Create Flask app for webhook
+    app = Flask(__name__)
 
     # Supported Terabox domains
     SUPPORTED_DOMAINS = [
@@ -109,18 +100,39 @@ def main():
         'https://www.teraboxapp.com'
     ]
 
-    def is_valid_terabox_url(url):
-        """
-        Check if the URL is from a supported Terabox domain
-        """
-        return any(url.startswith(domain) for domain in SUPPORTED_DOMAINS)
-
     def download_and_upload_terabox_file(message):
         """
         Download Terabox file and upload to Telegram with comprehensive error handling
         """
-        # [Rest of the original download_and_upload_terabox_file function remains the same]
-        # ... (paste the entire original function here)
+        # [Your existing download_and_upload_terabox_file function here]
+        # Placeholder implementation
+        bot.reply_to(message, "Terabox download functionality will be implemented here.")
+
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """
+        Health check endpoint
+        """
+        return Response("OK", status=200)
+
+    @app.route(WEBHOOK_LISTEN, methods=['POST'])
+    def webhook():
+        """
+        Webhook endpoint to receive Telegram updates
+        """
+        if request.headers.get('content-type') == 'application/json':
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            
+            try:
+                # Process the update
+                bot.process_new_updates([update])
+                return '', 200
+            except Exception as e:
+                logger.error(f"Error processing webhook update: {e}")
+                return 'Error', 500
+        
+        return 'Unsupported Media Type', 415
 
     @bot.message_handler(commands=['start', 'help'])
     def send_welcome(message):
@@ -148,19 +160,40 @@ def main():
         """
         download_and_upload_terabox_file(message)
 
-    def bot_polling():
+    def set_webhook():
         """
-        Main bot polling function with comprehensive error handling
+        Set webhook for the Telegram bot
         """
-        logger.info("Bot is starting...")
+        # Construct the full webhook URL
+        webhook_url = f"https://{WEBHOOK_HOST}{WEBHOOK_LISTEN}"
+        
         try:
-            bot.polling(none_stop=True)
+            # Remove existing webhook first
+            bot.delete_webhook(drop_pending_updates=True)
+            
+            # Set new webhook
+            bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set successfully to {webhook_url}")
         except Exception as e:
-            logger.error(f"Bot polling failed: {e}")
+            logger.error(f"Failed to set webhook: {e}")
             sys.exit(1)
 
-    # Start bot polling
-    bot_polling()
+    def run_flask_server():
+        """
+        Run Flask server for webhook
+        """
+        logger.info(f"Starting webhook server on {WEBHOOK_HOST}:{WEBHOOK_PORT}")
+        app.run(
+            host=WEBHOOK_HOST, 
+            port=WEBHOOK_PORT, 
+            debug=False
+        )
+
+    # Set webhook before starting server
+    set_webhook()
+
+    # Run Flask server
+    run_flask_server()
 
 if __name__ == "__main__":
     main()
