@@ -1,0 +1,14 @@
+version: "1"
+services:
+  - name: terabox-telegram-bot
+    type: web
+    runtime: docker
+    region: fra  # Frankfurt region
+    ports:
+      - port: 8080
+        protocol: TCP
+    env:
+      - key: TELEGRAM_BOT_TOKEN
+        value: $TELEGRAM_BOT_TOKEN
+      - key: RAPIDAPI_KEY
+        value: $RAPIDAPI_KEY
