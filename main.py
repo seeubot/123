@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
 import os
 import sys
-import venv
 import subprocess
 import platform
-import logging
-import threading
-from flask import Flask, request, Response
 
-def create_venv_and_install_dependencies():
+def install_dependencies():
     """
-    Create a virtual environment and install required dependencies
+    Install required Python packages with comprehensive error handling
     """
-    # Determine the Python executable
-    python_executable = sys.executable
-    
-    # Create virtual environment path
-    venv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv')
-    
-    # Create virtual environment if it doesn't exist
-    if not os.path.exists(venv_path):
-        print("Creating virtual environment...")
-        venv.create(venv_path, with_pip=True)
-    
-    # Determine pip and python paths based on the OS
-    if platform.system() == 'Windows':
-        pip_path = os.path.join(venv_path, 'Scripts', 'pip')
-        python_path = os.path.join(venv_path, 'Scripts', 'python')
-    else:
-        pip_path = os.path.join(venv_path, 'bin', 'pip')
-        python_path = os.path.join(venv_path, 'bin', 'python')
-    
+    # Ensure pip is up to date
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
+
     # List of dependencies to install
     dependencies = [
         'requests', 
@@ -40,26 +20,28 @@ def create_venv_and_install_dependencies():
         'gunicorn'
     ]
     
-    # Install dependencies in the virtual environment
+    # Install dependencies
     for package in dependencies:
         try:
-            subprocess.check_call([pip_path, 'install', package])
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
             print(f"Successfully installed {package}")
         except subprocess.CalledProcessError:
             print(f"Failed to install {package}")
-            sys.exit(1)
-    
-    return python_path
+            # Attempt alternative installation method
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', package])
+                print(f"Successfully installed {package} with --user flag")
+            except subprocess.CalledProcessError:
+                print(f"Critical: Could not install {package}")
+                sys.exit(1)
 
 def main():
-    # Create virtual environment and install dependencies
-    venv_python = create_venv_and_install_dependencies()
-    
-    # Restart the script using the virtual environment's Python
-    if venv_python != sys.executable:
-        os.execl(venv_python, venv_python, *sys.argv)
-    
-    # Rest of the script
+    # Install dependencies before importing
+    install_dependencies()
+
+    # Now import required modules
+    import os
+    import logging
     import telebot
     from dotenv import load_dotenv
     from flask import Flask, request, Response
@@ -102,11 +84,9 @@ def main():
 
     def download_and_upload_terabox_file(message):
         """
-        Download Terabox file and upload to Telegram with comprehensive error handling
+        Placeholder for Terabox download functionality
         """
-        # [Your existing download_and_upload_terabox_file function here]
-        # Placeholder implementation
-        bot.reply_to(message, "Terabox download functionality will be implemented here.")
+        bot.reply_to(message, "Terabox download functionality will be implemented soon.")
 
     @app.route('/health', methods=['GET'])
     def health_check():
@@ -178,22 +158,16 @@ def main():
             logger.error(f"Failed to set webhook: {e}")
             sys.exit(1)
 
-    def run_flask_server():
-        """
-        Run Flask server for webhook
-        """
-        logger.info(f"Starting webhook server on {WEBHOOK_HOST}:{WEBHOOK_PORT}")
-        app.run(
-            host=WEBHOOK_HOST, 
-            port=WEBHOOK_PORT, 
-            debug=False
-        )
-
     # Set webhook before starting server
     set_webhook()
 
     # Run Flask server
-    run_flask_server()
+    logger.info(f"Starting webhook server on {WEBHOOK_HOST}:{WEBHOOK_PORT}")
+    app.run(
+        host=WEBHOOK_HOST, 
+        port=WEBHOOK_PORT, 
+        debug=False
+    )
 
 if __name__ == "__main__":
     main()
