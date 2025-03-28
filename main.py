@@ -1,11 +1,12 @@
 import os
 import sys
-import telebot
+import logging
 import requests
 import urllib.parse
+import telebot
+from telebot import types
 from dotenv import load_dotenv
 import tempfile
-import logging
 
 # Configure logging
 logging.basicConfig(
@@ -56,23 +57,25 @@ def is_valid_terabox_url(url):
     """
     return any(url.startswith(domain) for domain in SUPPORTED_DOMAINS)
 
-def download_and_upload_terabox_file(message, terabox_url):
+def download_and_upload_terabox_file(message):
     """
     Download Terabox file and upload to Telegram
     """
-    # URL encode the Terabox URL
-    encoded_url = urllib.parse.quote(terabox_url)
-    
-    # RapidAPI request headers
-    headers = {
-        'x-rapidapi-key': RAPIDAPI_KEY,
-        'x-rapidapi-host': RAPIDAPI_HOST
-    }
+    terabox_url = message.text.strip()
     
     try:
         # Send initial processing message
         processing_msg = bot.reply_to(message, "⏳ Processing your link...")
         logger.info(f"Processing Terabox URL: {terabox_url}")
+        
+        # URL encode the Terabox URL
+        encoded_url = urllib.parse.quote(terabox_url)
+        
+        # RapidAPI request headers
+        headers = {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': RAPIDAPI_HOST
+        }
         
         # Make the API request to get download link
         response = requests.get(
@@ -147,7 +150,11 @@ def download_and_upload_terabox_file(message, terabox_url):
         
         # Open the file and send it
         with open(temp_file_path, 'rb') as file:
-            bot.send_document(message.chat.id, file, caption=f"📂 {filename}")
+            bot.send_document(
+                message.chat.id, 
+                file, 
+                caption=f"📂 {filename}"
+            )
         
         # Clean up temporary file
         os.unlink(temp_file_path)
@@ -189,13 +196,12 @@ def send_welcome(message):
     )
     bot.reply_to(message, welcome_text)
 
-@bot.message_handler(func=lambda message: is_valid_terabox_url(message.text.strip()))
+@bot.message_handler(func=lambda message: message.text and any(message.text.strip().startswith(domain) for domain in SUPPORTED_DOMAINS))
 def handle_terabox_link(message):
     """
     Handle Terabox link messages
     """
-    terabox_url = message.text.strip()
-    download_and_upload_terabox_file(message, terabox_url)
+    download_and_upload_terabox_file(message)
 
 def main():
     """
