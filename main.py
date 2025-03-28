@@ -1,13 +1,15 @@
 import os
 import time
-import telebot
 import requests
 import logging
 import sys
 import json
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 import urllib3
+
+# Import python-telegram-bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Use environment variables for configuration
 PORT = int(os.getenv('PORT', 5000))
@@ -33,62 +35,20 @@ logger = logging.getLogger(__name__)
 class TeraboxDownloader:
     def __init__(self, bot_token, rapid_api_key, dump_channel_id=None):
         try:
-            # Initialize bot with a try-except to handle request_timeout compatibility
-            try:
-                # First, try initializing with request_timeout
-                self.bot = telebot.TeleBot(
-                    bot_token, 
-                    parse_mode=None,
-                    request_timeout=60  # Increased timeout
-                )
-            except TypeError:
-                # If request_timeout is not supported, initialize without it
-                self.bot = telebot.TeleBot(
-                    bot_token, 
-                    parse_mode=None
-                )
-            
-            # Verify bot connection
-            bot_info = self.bot.get_me()
-            logger.info(f"Bot connected successfully: @{bot_info.username}")
-            
+            self.bot_token = bot_token
             self.rapid_api_key = rapid_api_key
-            self.download_directory = "downloads"
             self.dump_channel_id = dump_channel_id
+            self.download_directory = "downloads"
             
             # Create download directory
             os.makedirs(self.download_directory, exist_ok=True)
             
-            # Register handlers
-            self.register_handlers()
+            # Store last file details
+            self.last_file_details = None
         
         except Exception as e:
             logger.error(f"Initialization Error: {e}")
             raise
-    
-    def register_handlers(self):
-        @self.bot.message_handler(commands=['start', 'help'])
-        def send_welcome(message):
-            welcome_text = (
-                "Welcome to Terabox Downloader Bot! 📦\n"
-                "Send /download followed by a Terabox URL to download a file.\n"
-                "Example: /download https://terabox.com/your_file_link\n\n"
-                "Files will be sent to you and optionally to the dump channel."
-            )
-            self.bot.reply_to(message, welcome_text)
-        
-        @self.bot.message_handler(commands=['download'])
-        def handle_download(message):
-            try:
-                if len(message.text.split()) < 2:
-                    self.bot.reply_to(message, "Please provide a Terabox URL")
-                    return
-                
-                url = message.text.split(' ', 1)[1]
-                self.download_terabox_file(message, url)
-            except Exception as e:
-                logger.error(f"Download handler error: {e}")
-                self.bot.reply_to(message, f"Error: {str(e)}")
     
     def format_file_size(self, size_bytes):
         """Convert file size to human-readable format"""
@@ -97,17 +57,31 @@ class TeraboxDownloader:
                 return f"{size_bytes:.2f} {unit}"
             size_bytes /= 1024.0
     
-    def send_to_dump_channel(self, file_path, file_details):
-        """
-        Send file to dump channel with additional metadata
-        
-        Args:
-            file_path (str): Path to the file to be sent
-            file_details (dict): Details about the file
-        
-        Returns:
-            bool: True if successful, False otherwise
-        """
+    async def send_welcome(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Send welcome message"""
+        welcome_text = (
+            "Welcome to Terabox Downloader Bot! 📦\n"
+            "Send /download followed by a Terabox URL to download a file.\n"
+            "Example: /download https://terabox.com/your_file_link\n\n"
+            "Files will be sent to you and optionally to the dump channel."
+        )
+        await update.message.reply_text(welcome_text)
+    
+    async def handle_download(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle download command"""
+        try:
+            if len(context.args) < 1:
+                await update.message.reply_text("Please provide a Terabox URL")
+                return
+            
+            url = context.args[0]
+            await self.download_terabox_file(update, url)
+        except Exception as e:
+            logger.error(f"Download handler error: {e}")
+            await update.message.reply_text(f"Error: {str(e)}")
+    
+    async def send_to_dump_channel(self, file_path, file_details):
+        """Send file to dump channel"""
         if not self.dump_channel_id:
             logger.info("No dump channel configured. Skipping channel upload.")
             return False
@@ -122,11 +96,10 @@ class TeraboxDownloader:
             
             # Open and send file
             with open(file_path, 'rb') as file:
-                self.bot.send_document(
-                    self.dump_channel_id, 
-                    file, 
+                await self.application.bot.send_document(
+                    chat_id=self.dump_channel_id, 
+                    document=file, 
                     caption=caption,
-                    timeout=120  # Increased timeout
                 )
             
             logger.info(f"File {file_details['file_name']} sent to dump channel")
@@ -137,17 +110,7 @@ class TeraboxDownloader:
             return False
     
     def download_file(self, url, filename, original_url=None):
-        """
-        Download file from given URL and save to downloads directory
-        
-        Args:
-            url (str): Download URL
-            filename (str): Name to save the file as
-            original_url (str, optional): Original source URL
-        
-        Returns:
-            str: Full path to downloaded file
-        """
+        """Download file from given URL"""
         try:
             # Download file with SSL verification disabled
             response = requests.get(
@@ -170,14 +133,10 @@ class TeraboxDownloader:
                 counter += 1
             
             # Save the file
-            file_size = int(response.headers.get('content-length', 0))
-            current_size = 0
-            
             with open(file_path, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         file.write(chunk)
-                        current_size += len(chunk)
             
             return file_path
         
@@ -185,7 +144,8 @@ class TeraboxDownloader:
             logger.error(f"File download error: {e}")
             raise
     
-    def download_terabox_file(self, message, url):
+    async def download_terabox_file(self, update: Update, url):
+        """Download Terabox file and send details"""
         try:
             # Prepare API request
             headers = {
@@ -226,154 +186,124 @@ class TeraboxDownloader:
             )
             
             # Create inline keyboard with download buttons
-            keyboard = InlineKeyboardMarkup()
+            keyboard = []
             
             # Direct Download Button
             if file_details['link'] != 'N/A':
-                download_button = InlineKeyboardButton(
-                    "📥 Direct Download", 
-                    callback_data=f"direct_download_{file_details['file_name']}"
-                )
-                keyboard.add(download_button)
+                keyboard.append([
+                    InlineKeyboardButton(
+                        "📥 Direct Download", 
+                        callback_data=f"direct_download_{file_details['file_name']}"
+                    )
+                ])
             
             # Fast Download Button
             if file_details['fastlink'] != 'N/A':
-                fast_download_button = InlineKeyboardButton(
-                    "🚀 Fast Download", 
-                    callback_data=f"fast_download_{file_details['file_name']}"
-                )
-                keyboard.add(fast_download_button)
+                keyboard.append([
+                    InlineKeyboardButton(
+                        "🚀 Fast Download", 
+                        callback_data=f"fast_download_{file_details['file_name']}"
+                    )
+                ])
+            
+            # Store file details
+            self.last_file_details = file_details
             
             # Send file details with buttons
-            self.bot.reply_to(message, details_message, reply_markup=keyboard)
-            
-            # Store full file details for later use
-            self.bot.last_file_details = file_details
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+            await update.message.reply_text(details_message, reply_markup=reply_markup)
         
         except requests.RequestException as e:
             logger.error(f"API request error: {e}")
-            self.bot.reply_to(message, f"Download error: {str(e)}")
+            await update.message.reply_text(f"Download error: {str(e)}")
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
-            self.bot.reply_to(message, f"Unexpected error: {str(e)}")
+            await update.message.reply_text(f"Unexpected error: {str(e)}")
     
-    def start_bot(self, webhook_mode=False):
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith(('direct_download_', 'fast_download_')))
-        def download_file_callback(call):
-            try:
-                # Add a small delay to prevent quick successive calls
-                time.sleep(1)
-                
-                # Retrieve stored file details
-                file_details = self.bot.last_file_details
-                
-                # Determine download type
-                download_type = call.data.split('_', 2)[0]
-                
-                # Select appropriate download link
-                if download_type == 'direct' and file_details['link'] != 'N/A':
-                    download_link = file_details['link']
-                elif download_type == 'fast' and file_details['fastlink'] != 'N/A':
-                    download_link = file_details['fastlink']
-                else:
-                    # Safely answer callback query
-                    try:
-                        self.bot.answer_callback_query(
-                            call.id, 
-                            "No download link available.", 
-                            show_alert=True
-                        )
-                    except Exception as alert_e:
-                        logger.error(f"Callback query answer error: {alert_e}")
-                    return
-                
-                # Download the file
-                file_path = self.download_file(
-                    download_link, 
-                    file_details['file_name'], 
-                    file_details.get('original_url')
-                )
-                
-                # Send file to user with additional error handling
-                try:
-                    with open(file_path, 'rb') as file:
-                        # Use send_document with additional parameters
-                        sent_message = self.bot.send_document(
-                            call.message.chat.id, 
-                            file, 
-                            timeout=120  # Increased timeout
-                        )
-                    
-                    # Attempt to send to dump channel
-                    self.send_to_dump_channel(file_path, file_details)
-                    
-                    # Answer callback query
-                    download_type_name = "Direct" if download_type == 'direct' else "Fast"
-                    self.bot.answer_callback_query(
-                        call.id, 
-                        f"{download_type_name} Download: {file_details['file_name']} sent successfully!"
-                    )
-                
-                except Exception as send_error:
-                    logger.error(f"File send error: {send_error}")
-                    # Attempt to answer callback query about send error
-                    try:
-                        self.bot.answer_callback_query(
-                            call.id, 
-                            f"Failed to send file: {str(send_error)}", 
-                            show_alert=True
-                        )
-                    except Exception as alert_e:
-                        logger.error(f"Callback query answer error: {alert_e}")
+    async def download_file_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle file download callback"""
+        try:
+            # Add a small delay to prevent quick successive calls
+            await asyncio.sleep(1)
             
-            except Exception as e:
-                logger.error(f"File download error: {e}")
-                # Last resort error handling
-                try:
-                    self.bot.answer_callback_query(
-                        call.id, 
-                        f"Download failed: {str(e)}", 
-                        show_alert=True
+            query = update.callback_query
+            await query.answer()
+            
+            # Retrieve stored file details
+            file_details = self.last_file_details
+            
+            # Determine download type
+            download_type = query.data.split('_', 2)[0]
+            
+            # Select appropriate download link
+            if download_type == 'direct' and file_details['link'] != 'N/A':
+                download_link = file_details['link']
+            elif download_type == 'fast' and file_details['fastlink'] != 'N/A':
+                download_link = file_details['fastlink']
+            else:
+                await query.edit_message_text("No download link available.")
+                return
+            
+            # Download the file
+            file_path = self.download_file(
+                download_link, 
+                file_details['file_name'], 
+                file_details.get('original_url')
+            )
+            
+            # Send file to user
+            try:
+                with open(file_path, 'rb') as file:
+                    sent_message = await context.bot.send_document(
+                        chat_id=query.message.chat_id, 
+                        document=file
                     )
-                except Exception as alert_e:
-                    logger.error(f"Callback query answer error: {alert_e}")
+                
+                # Attempt to send to dump channel
+                await self.send_to_dump_channel(file_path, file_details)
+                
+                # Update message
+                download_type_name = "Direct" if download_type == 'direct' else "Fast"
+                await query.edit_message_text(
+                    f"{download_type_name} Download: {file_details['file_name']} sent successfully!"
+                )
+            
+            except Exception as send_error:
+                logger.error(f"File send error: {send_error}")
+                await query.edit_message_text(f"Failed to send file: {str(send_error)}")
+        
+        except Exception as e:
+            logger.error(f"File download error: {e}")
+            await query.edit_message_text(f"Download failed: {str(e)}")
+    
+    async def start_bot(self, webhook_mode=False):
+        """Start the bot"""
+        # Create the Application and pass it your bot's token
+        self.application = Application.builder().token(self.bot_token).build()
+        
+        # Register handlers
+        self.application.add_handler(CommandHandler("start", self.send_welcome))
+        self.application.add_handler(CommandHandler("help", self.send_welcome))
+        self.application.add_handler(CommandHandler("download", self.handle_download))
+        self.application.add_handler(CallbackQueryHandler(self.download_file_callback))
         
         if webhook_mode:
             # Webhook mode for Render deployment
             logger.info("Starting bot in webhook mode...")
-            self.bot.remove_webhook()
-            import flask
-            
-            app = flask.Flask(__name__)
-            
-            @app.route('/' + os.getenv('TELEGRAM_BOT_TOKEN'), methods=['POST'])
-            def webhook():
-                json_string = flask.request.get_data().decode('utf-8')
-                update = telebot.types.Update.de_json(json_string)
-                self.bot.process_new_updates([update])
-                return "OK"
-            
-            @app.route('/')
-            def home():
-                return "Bot is running!"
-            
-            # Set webhook
-            self.bot.set_webhook(url=f"{os.getenv('WEBHOOK_URL')}/{os.getenv('TELEGRAM_BOT_TOKEN')}")
-            
-            return app
+            await self.application.initialize()
+            await self.application.start()
+            await self.application.updater.start_webhook(
+                listen='0.0.0.0',
+                port=PORT,
+                url_path=self.bot_token,
+                webhook_url=f"{HOST}/{self.bot_token}"
+            )
         else:
             # Polling mode
-            try:
-                logger.info("Starting bot polling...")
-                self.bot.polling(
-                    none_stop=True, 
-                    interval=0, 
-                    timeout=30,
-                    long_polling_timeout=30
-                )
-            except Exception as e:
-                logger.error(f"Bot polling error: {e}")
-                raise
+            logger.info("Starting bot in polling mode...")
+            await self.application.run_polling(
+                drop_pending_updates=True
+            )
 
 def main():
     # Retrieve bot token and API key from environment variables
@@ -394,20 +324,24 @@ def main():
         sys.exit(1)
     
     try:
-        downloader = TeraboxDownloader(
-            BOT_TOKEN, 
-            RAPID_API_KEY, 
-            dump_channel_id=DUMP_CHANNEL_ID
-        )
+        import asyncio
         
-        if DEPLOYMENT_MODE == 'webhook':
-            # Webhook mode (for Render)
-            app = downloader.start_bot(webhook_mode=True)
-            import waitress
-            waitress.serve(app, host=HOST, port=PORT)
-        else:
-            # Polling mode
-            downloader.start_bot()
+        async def run_bot():
+            downloader = TeraboxDownloader(
+                BOT_TOKEN, 
+                RAPID_API_KEY, 
+                dump_channel_id=DUMP_CHANNEL_ID
+            )
+            
+            if DEPLOYMENT_MODE == 'webhook':
+                # Webhook mode (for Render)
+                await downloader.start_bot(webhook_mode=True)
+            else:
+                # Polling mode
+                await downloader.start_bot()
+        
+        asyncio.run(run_bot())
+    
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         print("Bot initialization failed. Check the log file for details.")
