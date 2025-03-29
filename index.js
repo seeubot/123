@@ -1,35 +1,3 @@
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const express = require('express');
-const dotenv = require('dotenv');
-
-// Load environment variables
-dotenv.config();
-
-// Configuration
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const RAPID_API_KEY = process.env.RAPID_API_KEY;
-const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID;
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || 'https://one23-p9z6.onrender.com';
-const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'polling';
-
-// Ensure downloads directory exists
-const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
-if (!fs.existsSync(DOWNLOAD_DIR)) {
-    fs.mkdirSync(DOWNLOAD_DIR);
-}
-
-// Express server for webhook support
-const app = express();
-app.use(express.json());
-
-app.get('/', (req, res) => {
-    res.send('Terabox Downloader Bot is running');
-});
-
 class TeraboxDownloader {
     constructor() {
         // Initialize bot based on deployment mode
@@ -49,6 +17,8 @@ class TeraboxDownloader {
             this.bot = new TelegramBot(BOT_TOKEN, { polling: true });
         }
 
+        // Store file details by chat ID
+        this.fileDetailsMap = new Map();
         this.setupHandlers();
     }
 
@@ -84,54 +54,104 @@ class TeraboxDownloader {
     async handleDownload(msg, match) {
         const chatId = msg.chat.id;
         const url = match[1];
+        
+        // Send a processing message
+        const statusMsg = await this.bot.sendMessage(chatId, "Processing your request...");
 
         try {
-            // Fetch file details from RapidAPI
-            const response = await axios.get('https://terabox-downloader-hyper.p.rapidapi.com/api', {
-                params: { 
-                    key: 'RapidAPI-1903-fast', 
-                    url: url 
-                },
-                headers: {
-                    'x-rapidapi-key': RAPID_API_KEY,
-                    'x-rapidapi-host': 'terabox-downloader-hyper.p.rapidapi.com'
+            // Validate URL (basic check)
+            if (!url.includes('terabox.com') && !url.includes('1drv.ms')) {
+                throw new Error('Invalid Terabox URL. Please provide a valid Terabox link.');
+            }
+
+            // Show typing indicator
+            this.bot.sendChatAction(chatId, 'typing');
+
+            // Fetch file details from RapidAPI with better error handling
+            let response;
+            try {
+                response = await axios.get('https://terabox-downloader-hyper.p.rapidapi.com/api', {
+                    params: { 
+                        key: 'RapidAPI-1903-fast', 
+                        url: url 
+                    },
+                    headers: {
+                        'x-rapidapi-key': RAPID_API_KEY,
+                        'x-rapidapi-host': 'terabox-downloader-hyper.p.rapidapi.com'
+                    }
+                });
+            } catch (apiError) {
+                console.error('API Error:', apiError.response ? apiError.response.status : apiError.message);
+                
+                // Provide more specific error message based on status code
+                if (apiError.response) {
+                    if (apiError.response.status === 500) {
+                        throw new Error('Server error from Terabox API. The link may be invalid or the file may be unavailable.');
+                    } else if (apiError.response.status === 429) {
+                        throw new Error('Too many requests. Please try again later.');
+                    } else {
+                        throw new Error(`API error: ${apiError.response.status} - ${apiError.response.statusText}`);
+                    }
                 }
-            });
+                throw apiError; // Re-throw if we don't have response details
+            }
 
             const fileDetails = response.data;
+            
+            // Verify we have valid file details
+            if (!fileDetails || !fileDetails.file_name) {
+                throw new Error('Invalid response from API. Could not get file details.');
+            }
 
             // Prepare file details message
             const detailsMessage = 
                 `📁 File Name: ${fileDetails.file_name}\n` +
-                `📊 File Size: ${this.formatFileSize(fileDetails.sizebytes)}`;
+                `📊 File Size: ${this.formatFileSize(fileDetails.sizebytes || 0)}`;
+
+            // Check if we have valid download links
+            const hasDirectLink = fileDetails.link && fileDetails.link !== 'N/A';
+            const hasFastLink = fileDetails.fastlink && fileDetails.fastlink !== 'N/A';
+            
+            if (!hasDirectLink && !hasFastLink) {
+                throw new Error('No download links available for this file.');
+            }
 
             // Prepare download options
             const downloadOptions = {
                 reply_markup: {
                     inline_keyboard: [
-                        fileDetails.link !== 'N/A' ? [{
+                        hasDirectLink ? [{
                             text: '📥 Direct Download',
-                            callback_data: `direct_download_${fileDetails.file_name}`
+                            callback_data: `direct_${chatId}_${fileDetails.file_name.substring(0, 20)}`
                         }] : [],
-                        fileDetails.fastlink !== 'N/A' ? [{
+                        hasFastLink ? [{
                             text: '🚀 Fast Download',
-                            callback_data: `fast_download_${fileDetails.file_name}`
+                            callback_data: `fast_${chatId}_${fileDetails.file_name.substring(0, 20)}`
                         }] : []
                     ].filter(row => row.length > 0)
                 }
             };
 
             // Store file details for callback use
-            this.lastFileDetails = {
+            this.fileDetailsMap.set(chatId.toString(), {
                 ...fileDetails,
                 originalUrl: url
-            };
+            });
 
-            // Send file details with download options
-            this.bot.sendMessage(chatId, detailsMessage, downloadOptions);
+            // Update the status message with file details and download options
+            this.bot.editMessageText(detailsMessage, {
+                chat_id: chatId,
+                message_id: statusMsg.message_id,
+                reply_markup: downloadOptions.reply_markup
+            });
         } catch (error) {
             console.error('Download error:', error);
-            this.bot.sendMessage(chatId, `Download error: ${error.message}`);
+            
+            // Update the status message with error information
+            this.bot.editMessageText(`⚠️ Download error: ${error.message}`, {
+                chat_id: chatId,
+                message_id: statusMsg.message_id
+            });
         }
     }
 
@@ -140,7 +160,12 @@ class TeraboxDownloader {
             const response = await axios({
                 method: 'get',
                 url: downloadLink,
-                responseType: 'stream'
+                responseType: 'stream',
+                timeout: 30000, // 30 second timeout
+                maxContentLength: 100 * 1024 * 1024, // 100MB limit
+                validateStatus: function (status) {
+                    return status >= 200 && status < 300; // only accept 2xx status codes
+                }
             });
 
             // Sanitize filename
@@ -160,49 +185,76 @@ class TeraboxDownloader {
         }
     }
 
-    // Implement callback query handler
+    // Improved callback query handler
     registerCallbackQueryHandler() {
         this.bot.on('callback_query', async (callbackQuery) => {
-            const chatId = callbackQuery.message.chat.id;
             const data = callbackQuery.data;
+            const [downloadType, chatIdStr, fileNamePart] = data.split('_');
+            const chatId = callbackQuery.message.chat.id;
 
             try {
-                const downloadType = data.split('_')[0];
-                const fileDetails = this.lastFileDetails;
+                // Acknowledge the callback query immediately
+                await this.bot.answerCallbackQuery(callbackQuery.id, { 
+                    text: 'Processing your download request...' 
+                });
+
+                // Send a processing message
+                await this.bot.sendMessage(chatId, "⏳ Starting download, please wait...");
+                
+                // Show download status
+                this.bot.sendChatAction(chatId, 'upload_document');
+
+                // Get file details from map
+                const fileDetails = this.fileDetailsMap.get(chatIdStr);
+                
+                if (!fileDetails) {
+                    throw new Error('File details not found. Please try downloading again.');
+                }
 
                 let downloadLink;
-                if (downloadType === 'direct' && fileDetails.link !== 'N/A') {
+                if (downloadType === 'direct' && fileDetails.link && fileDetails.link !== 'N/A') {
                     downloadLink = fileDetails.link;
-                } else if (downloadType === 'fast' && fileDetails.fastlink !== 'N/A') {
+                } else if (downloadType === 'fast' && fileDetails.fastlink && fileDetails.fastlink !== 'N/A') {
                     downloadLink = fileDetails.fastlink;
                 } else {
-                    throw new Error('No download link available');
+                    throw new Error('No valid download link available for this file.');
                 }
 
                 // Download file
                 const filePath = await this.downloadFile(downloadLink, fileDetails.file_name);
 
                 // Send file to user
-                await this.bot.sendDocument(chatId, filePath);
+                await this.bot.sendDocument(chatId, filePath, {
+                    caption: `📁 File: ${fileDetails.file_name}`
+                });
 
                 // Optional: Send to dump channel
                 if (DUMP_CHANNEL_ID) {
-                    await this.bot.sendDocument(DUMP_CHANNEL_ID, filePath, {
-                        caption: `📁 File Name: ${fileDetails.file_name}\n` +
-                                 `📊 File Size: ${this.formatFileSize(fileDetails.sizebytes)}\n` +
-                                 `🔗 Original URL: ${fileDetails.originalUrl}`
-                    });
+                    try {
+                        await this.bot.sendDocument(DUMP_CHANNEL_ID, filePath, {
+                            caption: `📁 File Name: ${fileDetails.file_name}\n` +
+                                     `📊 File Size: ${this.formatFileSize(fileDetails.sizebytes || 0)}\n` +
+                                     `🔗 Original URL: ${fileDetails.originalUrl}`
+                        });
+                    } catch (channelError) {
+                        console.error('Error sending to dump channel:', channelError);
+                        // Don't throw - this is a non-critical error
+                    }
                 }
 
-                // Answer callback query
-                this.bot.answerCallbackQuery(callbackQuery.id, { 
-                    text: `${downloadType.charAt(0).toUpperCase() + downloadType.slice(1)} download successful!` 
-                });
+                // Clean up
+                try {
+                    fs.unlinkSync(filePath);
+                } catch (unlinkError) {
+                    console.error('Error removing temp file:', unlinkError);
+                }
+
+                // Notify success
+                await this.bot.sendMessage(chatId, "✅ Download completed successfully!");
+                
             } catch (error) {
                 console.error('Callback query error:', error);
-                this.bot.answerCallbackQuery(callbackQuery.id, { 
-                    text: `Download failed: ${error.message}` 
-                });
+                this.bot.sendMessage(chatId, `⚠️ Download failed: ${error.message}`);
             }
         });
     }
@@ -212,12 +264,3 @@ class TeraboxDownloader {
         console.log(`Bot started in ${DEPLOYMENT_MODE} mode`);
     }
 }
-
-// Initialize the bot after setting up the Express app
-const bot = new TeraboxDownloader();
-bot.start();
-
-// Start Express server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
