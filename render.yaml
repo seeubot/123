@@ -1,6 +1,17 @@
 services:
   - type: web
-    name: terabox-downloader
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    name: terabox-downloader-bot
+    runtime: nodejs
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: RAPID_API_KEY
+        sync: false
+      - key: DUMP_CHANNEL_ID
+        sync: false
+      - key: DEPLOYMENT_MODE
+        value: webhook
+      - key: HOST
+        value: https://your-app-name.onrender.com
