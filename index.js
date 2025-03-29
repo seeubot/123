@@ -22,11 +22,28 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
     fs.mkdirSync(DOWNLOAD_DIR);
 }
 
+// Express server for webhook support
+const app = express();
+app.use(express.json());
+
+app.get('/', (req, res) => {
+    res.send('Terabox Downloader Bot is running');
+});
+
 class TeraboxDownloader {
     constructor() {
         // Initialize bot based on deployment mode
         if (DEPLOYMENT_MODE === 'webhook') {
-            this.bot = new TelegramBot(BOT_TOKEN, { webHook: { port: PORT } });
+            // For webhook mode, we'll use the Express server
+            this.bot = new TelegramBot(BOT_TOKEN);
+            
+            // Set up the webhook route in our Express app
+            app.post(`/${BOT_TOKEN}`, (req, res) => {
+                this.bot.processUpdate(req.body);
+                res.sendStatus(200);
+            });
+            
+            // Set the webhook externally
             this.bot.setWebHook(`${HOST}/${BOT_TOKEN}`);
         } else {
             this.bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -196,18 +213,11 @@ class TeraboxDownloader {
     }
 }
 
-// Express server for webhook support
-const app = express();
-app.use(express.json());
-
-app.get('/', (req, res) => {
-    res.send('Terabox Downloader Bot is running');
-});
-
+// Initialize the bot after setting up the Express app
 const bot = new TeraboxDownloader();
 bot.start();
 
-// Start server
+// Start Express server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
