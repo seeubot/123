@@ -1,3 +1,38 @@
+const TelegramBot = require('node-telegram-bot-api');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const dotenv = require('dotenv');
+
+// Load environment variables
+dotenv.config();
+
+// Configuration
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const RAPID_API_KEY = process.env.RAPID_API_KEY;
+const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID;
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || 'https://one23-p9z6.onrender.com';
+const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'polling';
+
+// Ensure downloads directory exists
+const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
+if (!fs.existsSync(DOWNLOAD_DIR)) {
+    fs.mkdirSync(DOWNLOAD_DIR);
+}
+
+// Express server for webhook support
+const app = express();
+app.use(express.json());
+
+app.get('/', (req, res) => {
+    res.send('Terabox Downloader Bot is running');
+});
+
+// Log the environment for debugging
+console.log(`Starting application with PORT=${PORT}, MODE=${DEPLOYMENT_MODE}`);
+
 class TeraboxDownloader {
     constructor() {
         // Initialize bot based on deployment mode
@@ -13,8 +48,10 @@ class TeraboxDownloader {
             
             // Set the webhook externally
             this.bot.setWebHook(`${HOST}/${BOT_TOKEN}`);
+            console.log(`Webhook set to ${HOST}/${BOT_TOKEN}`);
         } else {
             this.bot = new TelegramBot(BOT_TOKEN, { polling: true });
+            console.log('Bot started in polling mode');
         }
 
         // Store file details by chat ID
@@ -264,3 +301,20 @@ class TeraboxDownloader {
         console.log(`Bot started in ${DEPLOYMENT_MODE} mode`);
     }
 }
+
+// Initialize the bot
+const bot = new TeraboxDownloader();
+bot.start();
+
+// Start Express server with explicit host binding
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running and listening on port ${PORT}`);
+});
+
+// Add proper error handling for the server
+server.on('error', (error) => {
+    console.error('Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use`);
+    }
+});
