@@ -156,33 +156,32 @@ class TeraboxDownloader {
         }
     }
 
-    async fetchTeraboxDetailsFromAlphaAPI(teraboxUrl) {
+    async fetchTeraboxDetailsFromSEEUBOT(teraboxUrl) {
         try {
-            const videoId = this.extractTeraboxId(teraboxUrl);
-            console.log(`Using AlphaAPIs with ID: ${videoId}`);
+            console.log(`Using SEEUBOT with URL: ${teraboxUrl}`);
             
-            const response = await axios.get(`https://alphaapis.org/terabox?id=${videoId}`);
+            const response = await axios.get(`https://wdzone-terabox-api.vercel.app/api?url=${encodeURIComponent(teraboxUrl)}`);
             
-            if (response.data.status !== "success" || !response.data.data) {
-                throw new Error('Failed to get file details from AlphaAPIs');
+            if (response.data["✅ Status"] !== "Success" || !response.data["📜 Extracted Info"]) {
+                throw new Error('Failed to get file details from SEEUBOT');
             }
             
-            // Convert AlphaAPI format to our standard format
+            // Extract file info from the SEEUBOT response
+            const fileInfo = response.data["📜 Extracted Info"][0];
+            
+            // Convert SEEUBOT format to our standard format
             return {
-                file_name: response.data.data.file_name,
-                sizebytes: response.data.data.file_size,
-                file_size: response.data.data.file_size,
-                link: response.data.data.download_url,
-                fastlink: response.data.data.download_url,
-                thumbnail: response.data.data.thumbnail || null,
-                duration: response.data.data.duration || null,
-                created_at: response.data.data.created_at || null,
-                is_hd: response.data.data.is_hd || false,
-                file_type: response.data.data.file_type || null
+                file_name: fileInfo["📂 Title"],
+                sizebytes: fileInfo["📏 Size"],
+                file_size: fileInfo["📏 Size"],
+                link: fileInfo["🔽 Direct Download Link"],
+                fastlink: fileInfo["🔽 Direct Download Link"],
+                thumbnail: fileInfo["🖼️ Thumbnails"] ? fileInfo["🖼️ Thumbnails"]["360x270"] : null,
+                file_type: fileInfo["📂 Title"].split('.').pop() || null
             };
         } catch (error) {
-            console.error('AlphaAPI error:', error);
-            throw new Error(`AlphaAPI error: ${error.message}`);
+            console.error('SEEUBOT error:', error);
+            throw new Error(`SEEUBOT error: ${error.message}`);
         }
     }
 
@@ -213,9 +212,9 @@ class TeraboxDownloader {
     // Try to fetch from both APIs and return the best result
     async getBestTeraboxDetails(url) {
         let rapidAPIResult = null;
-        let alphaAPIResult = null;
+        let seeuBotResult = null;
         let rapidAPIError = null;
-        let alphaAPIError = null;
+        let seeuBotError = null;
         
         // Try RapidAPI
         try {
@@ -224,25 +223,25 @@ class TeraboxDownloader {
             rapidAPIError = error;
         }
         
-        // Try AlphaAPI
+        // Try SEEUBOT
         try {
-            alphaAPIResult = await this.fetchTeraboxDetailsFromAlphaAPI(url);
+            seeuBotResult = await this.fetchTeraboxDetailsFromSEEUBOT(url);
         } catch (error) {
-            alphaAPIError = error;
+            seeuBotError = error;
         }
         
         // If both failed, throw error
-        if (!rapidAPIResult && !alphaAPIResult) {
-            throw new Error(`Both APIs failed. RapidAPI: ${rapidAPIError?.message || 'Unknown error'}, AlphaAPI: ${alphaAPIError?.message || 'Unknown error'}`);
+        if (!rapidAPIResult && !seeuBotResult) {
+            throw new Error(`Both APIs failed. RapidAPI: ${rapidAPIError?.message || 'Unknown error'}, SEEUBOT: ${seeuBotError?.message || 'Unknown error'}`);
         }
         
         // If only one succeeded, return that one
-        if (rapidAPIResult && !alphaAPIResult) {
+        if (rapidAPIResult && !seeuBotResult) {
             return { details: rapidAPIResult, source: 'RapidAPI' };
         }
         
-        if (!rapidAPIResult && alphaAPIResult) {
-            return { details: alphaAPIResult, source: 'AlphaAPI' };
+        if (!rapidAPIResult && seeuBotResult) {
+            return { details: seeuBotResult, source: 'SEEUBOT' };
         }
         
         // If both succeeded, compare and return the best one
@@ -251,8 +250,8 @@ class TeraboxDownloader {
             return { details: rapidAPIResult, source: 'RapidAPI' };
         }
         
-        if (alphaAPIResult.fastlink && alphaAPIResult.fastlink !== 'N/A') {
-            return { details: alphaAPIResult, source: 'AlphaAPI' };
+        if (seeuBotResult.fastlink && seeuBotResult.fastlink !== 'N/A') {
+            return { details: seeuBotResult, source: 'SEEUBOT' };
         }
         
         // If no fast links, prefer the one with direct link
@@ -260,15 +259,15 @@ class TeraboxDownloader {
             return { details: rapidAPIResult, source: 'RapidAPI' };
         }
         
-        // Default to AlphaAPI if both have similar capabilities
-        return { details: alphaAPIResult, source: 'AlphaAPI' };
+        // Default to SEEUBOT if both have similar capabilities
+        return { details: seeuBotResult, source: 'SEEUBOT' };
     }
 
-    // Force fetch from Alpha API only
-    async getAlphaAPIDetails(url) {
+    // Force fetch from SEEUBOT only
+    async getSEEUBOTDetails(url) {
         try {
-            const details = await this.fetchTeraboxDetailsFromAlphaAPI(url);
-            return { details, source: 'AlphaAPI' };
+            const details = await this.fetchTeraboxDetailsFromSEEUBOT(url);
+            return { details, source: 'SEEUBOT' };
         } catch (error) {
             throw error;
         }
@@ -414,32 +413,32 @@ class TeraboxDownloader {
         return false;
     }
 
-    // Handle large file downloads with Alpha API fallback and direct link button
+    // Handle large file downloads with SEEUBOT fallback and direct link button
     async handleLargeFileDownload(chatId, statusMsgId, detailsMessage, fileDetails, downloadLink, originalUrl, serviceProvider) {
         // First, inform user about large file
-        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Attempting download with Alpha server...`, {
+        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Attempting download with SEEUBOT server...`, {
             chat_id: chatId,
             message_id: statusMsgId
         });
         
         try {
-            // Try to get Alpha API details specifically
-            const alphaResult = await this.getAlphaAPIDetails(originalUrl);
-            const alphaLink = alphaResult.details.fastlink || alphaResult.details.link;
+            // Try to get SEEUBOT details specifically
+            const seeuBotResult = await this.getSEEUBOTDetails(originalUrl);
+            const seeuBotLink = seeuBotResult.details.fastlink || seeuBotResult.details.link;
             
-            if (!alphaLink || alphaLink === 'N/A') {
-                throw new Error('No download link available from Alpha server');
+            if (!seeuBotLink || seeuBotLink === 'N/A') {
+                throw new Error('No download link available from SEEUBOT server');
             }
             
-            // Try downloading with Alpha API
-            await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading large file via Alpha server...`, {
+            // Try downloading with SEEUBOT
+            await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading large file via SEEUBOT server...`, {
                 chat_id: chatId,
                 message_id: statusMsgId
             });
             
             try {
                 // Attempt the download
-                const filePath = await this.downloadAndSendFile(chatId, alphaLink, fileDetails.file_name, statusMsgId, detailsMessage);
+                const filePath = await this.downloadAndSendFile(chatId, seeuBotLink, fileDetails.file_name, statusMsgId, detailsMessage);
                 
                 // Send to dump channel if configured
                 if (DUMP_CHANNEL_ID) {
@@ -449,7 +448,7 @@ class TeraboxDownloader {
                                     `📊 File Size: ${this.formatFileSize(fs.statSync(filePath).size)}\n` +
                                     `🔗 Original URL: ${originalUrl}\n` +
                                     `🌐 Source: ${serviceProvider}\n` +
-                                    `🔌 API: AlphaAPI`
+                                    `🔌 API: SEEUBOT`
                         });
                     } catch (channelError) {
                         console.error('Error sending to dump channel:', channelError);
@@ -463,21 +462,21 @@ class TeraboxDownloader {
                     console.error('Error removing temp file:', unlinkError);
                 }
                 
-            } catch (alphaDownloadError) {
-                // If Alpha download fails, offer direct link button
-                console.error('Alpha download failed:', alphaDownloadError);
-                this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink, alphaLink);
+            } catch (seeuBotDownloadError) {
+                // If SEEUBOT download fails, offer direct link button
+                console.error('SEEUBOT download failed:', seeuBotDownloadError);
+                this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink, seeuBotLink);
             }
             
-        } catch (alphaError) {
-            // If Alpha API fails, offer direct link button
-            console.error('Alpha API failed:', alphaError);
+        } catch (seeuBotError) {
+            // If SEEUBOT fails, offer direct link button
+            console.error('SEEUBOT failed:', seeuBotError);
             this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink);
         }
     }
 
     // Send a message with direct download link button
-    async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, alphaLink = null) {
+    async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, seeuBotLink = null) {
         // Prepare inline keyboard with download buttons
         const inlineKeyboard = [];
         
@@ -487,11 +486,11 @@ class TeraboxDownloader {
             url: primaryLink
         }]);
         
-        // Add Alpha link if available and different
-        if (alphaLink && alphaLink !== primaryLink) {
+        // Add SEEUBOT link if available and different
+        if (seeuBotLink && seeuBotLink !== primaryLink) {
             inlineKeyboard.push([{
                 text: '📥 Alternative Download Link',
-                url: alphaLink
+                url: seeuBotLink
             }]);
         }
         
