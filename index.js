@@ -264,9 +264,20 @@ class TeraboxDownloader {
         return { details: alphaAPIResult, source: 'AlphaAPI' };
     }
 
+    // Force fetch from Alpha API only
+    async getAlphaAPIDetails(url) {
+        try {
+            const details = await this.fetchTeraboxDetailsFromAlphaAPI(url);
+            return { details, source: 'AlphaAPI' };
+        } catch (error) {
+            throw error;
+        }
+    }
+
     async handleDownload(msg, match) {
         const chatId = msg.chat.id;
         const url = match[1];
+        const originalUrl = url; // Store original URL for reference
         
         // Send a processing message
         const statusMsg = await this.bot.sendMessage(chatId, "Processing your request...");
@@ -323,18 +334,17 @@ class TeraboxDownloader {
             // Show download status
             this.bot.sendChatAction(chatId, 'upload_document');
             
-            // Start the download
-            await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading file...`, {
-                chat_id: chatId,
-                message_id: statusMsg.message_id
-            });
+            // Check file size to determine how to handle
+            const isLargeFile = this.isLargeFile(fileDetails);
             
-            try {
-                // For files smaller than 50MB, download and send via bot
-                if ((Number(fileDetails.sizebytes) < 50 * 1024 * 1024) || 
-                    (fileDetails.file_size && fileDetails.file_size.includes('MB') && 
-                     parseFloat(fileDetails.file_size) < 50)) {
-                    
+            if (!isLargeFile) {
+                // For smaller files, proceed with regular download
+                await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading file...`, {
+                    chat_id: chatId,
+                    message_id: statusMsg.message_id
+                });
+                
+                try {
                     const filePath = await this.downloadAndSendFile(chatId, downloadLink, fileDetails.file_name, statusMsg.message_id, detailsMessage);
                     
                     // Send to dump channel if configured
@@ -358,17 +368,12 @@ class TeraboxDownloader {
                     } catch (unlinkError) {
                         console.error('Error removing temp file:', unlinkError);
                     }
-                    
-                } else {
-                    // For larger files, send direct link
-                    await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Use the direct download link:\n\n${downloadLink}`, {
-                        chat_id: chatId,
-                        message_id: statusMsg.message_id,
-                        disable_web_page_preview: false
-                    });
+                } catch (dlError) {
+                    throw new Error(`Download failed: ${dlError.message}`);
                 }
-            } catch (dlError) {
-                throw new Error(`Download failed: ${dlError.message}`);
+            } else {
+                // Handle large file (>50MB)
+                await this.handleLargeFileDownload(chatId, statusMsg.message_id, detailsMessage, fileDetails, downloadLink, originalUrl, serviceProvider);
             }
             
         } catch (error) {
@@ -380,6 +385,124 @@ class TeraboxDownloader {
                 message_id: statusMsg.message_id
             });
         }
+    }
+
+    // Check if file is larger than 50MB
+    isLargeFile(fileDetails) {
+        // Check for size in bytes
+        if (fileDetails.sizebytes) {
+            const size = Number(fileDetails.sizebytes);
+            if (!isNaN(size) && size >= 50 * 1024 * 1024) {
+                return true;
+            }
+        }
+        
+        // Check for formatted size
+        if (fileDetails.file_size && typeof fileDetails.file_size === 'string') {
+            if (fileDetails.file_size.includes('GB')) {
+                return true; // Any GB file is definitely > 50MB
+            }
+            
+            if (fileDetails.file_size.includes('MB')) {
+                const sizeMB = parseFloat(fileDetails.file_size);
+                if (!isNaN(sizeMB) && sizeMB >= 50) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    // Handle large file downloads with Alpha API fallback and direct link button
+    async handleLargeFileDownload(chatId, statusMsgId, detailsMessage, fileDetails, downloadLink, originalUrl, serviceProvider) {
+        // First, inform user about large file
+        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Attempting download with Alpha server...`, {
+            chat_id: chatId,
+            message_id: statusMsgId
+        });
+        
+        try {
+            // Try to get Alpha API details specifically
+            const alphaResult = await this.getAlphaAPIDetails(originalUrl);
+            const alphaLink = alphaResult.details.fastlink || alphaResult.details.link;
+            
+            if (!alphaLink || alphaLink === 'N/A') {
+                throw new Error('No download link available from Alpha server');
+            }
+            
+            // Try downloading with Alpha API
+            await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading large file via Alpha server...`, {
+                chat_id: chatId,
+                message_id: statusMsgId
+            });
+            
+            try {
+                // Attempt the download
+                const filePath = await this.downloadAndSendFile(chatId, alphaLink, fileDetails.file_name, statusMsgId, detailsMessage);
+                
+                // Send to dump channel if configured
+                if (DUMP_CHANNEL_ID) {
+                    try {
+                        await this.bot.sendDocument(DUMP_CHANNEL_ID, filePath, {
+                            caption: `📁 File Name: ${fileDetails.file_name}\n` +
+                                    `📊 File Size: ${this.formatFileSize(fs.statSync(filePath).size)}\n` +
+                                    `🔗 Original URL: ${originalUrl}\n` +
+                                    `🌐 Source: ${serviceProvider}\n` +
+                                    `🔌 API: AlphaAPI`
+                        });
+                    } catch (channelError) {
+                        console.error('Error sending to dump channel:', channelError);
+                    }
+                }
+                
+                // Clean up
+                try {
+                    fs.unlinkSync(filePath);
+                } catch (unlinkError) {
+                    console.error('Error removing temp file:', unlinkError);
+                }
+                
+            } catch (alphaDownloadError) {
+                // If Alpha download fails, offer direct link button
+                console.error('Alpha download failed:', alphaDownloadError);
+                this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink, alphaLink);
+            }
+            
+        } catch (alphaError) {
+            // If Alpha API fails, offer direct link button
+            console.error('Alpha API failed:', alphaError);
+            this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink);
+        }
+    }
+
+    // Send a message with direct download link button
+    async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, alphaLink = null) {
+        // Prepare inline keyboard with download buttons
+        const inlineKeyboard = [];
+        
+        // Primary link button
+        inlineKeyboard.push([{
+            text: '📥 Download Link',
+            url: primaryLink
+        }]);
+        
+        // Add Alpha link if available and different
+        if (alphaLink && alphaLink !== primaryLink) {
+            inlineKeyboard.push([{
+                text: '📥 Alternative Download Link',
+                url: alphaLink
+            }]);
+        }
+        
+        // Send message with buttons
+        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ Unable to download large file directly. Use the download links below:`, {
+            chat_id: chatId,
+            message_id: statusMsgId,
+            reply_markup: {
+                inline_keyboard: inlineKeyboard
+            }
+        });
     }
 
     async downloadAndSendFile(chatId, downloadLink, fileName, statusMsgId, detailsMessage) {
