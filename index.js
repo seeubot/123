@@ -4,10 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const dotenv = require('dotenv');
-const { exec } = require('child_process');
-const fileType = require('file-type');
-const util = require('util');
-const execPromise = util.promisify(exec);
 const url = require('url');
 
 // Load environment variables
@@ -21,16 +17,10 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'https://one23-p9z6.onrender.com';
 const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'polling';
 
-// Ensure directories exist
+// Ensure download directory exists
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
-const CONVERTED_DIR = path.join(__dirname, 'converted');
-
 if (!fs.existsSync(DOWNLOAD_DIR)) {
     fs.mkdirSync(DOWNLOAD_DIR);
-}
-
-if (!fs.existsSync(CONVERTED_DIR)) {
-    fs.mkdirSync(CONVERTED_DIR);
 }
 
 // Express server for webhook support
@@ -38,20 +28,31 @@ const app = express();
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Terabox Downloader Bot with MP4 Conversion is running');
+    res.send('Terabox Downloader Bot is running');
 });
 
 // Log the environment for debugging
 console.log(`Starting application with PORT=${PORT}, MODE=${DEPLOYMENT_MODE}`);
 
-// Supported domains - Only TeraBox as requested
+// Supported domains - Extended list of TeraBox related domains
 const SUPPORTED_DOMAINS = [
     'terabox.com',
     'teraboxapp.com',
-    '1drv.ms' // Keep this as it's related to TeraBox
+    '1drv.ms',
+    'nephobox.com',
+    '4funbox.com',
+    'mirrobox.com',
+    'momerybox.com',
+    '1024tera.com',
+    'terabox.app',
+    'gibibox.com',
+    'goaibox.com',
+    'terasharelink.com',
+    'teraboxlink.com',
+    'terafileshare.com'
 ];
 
-class MultiPlatformDownloader {
+class TeraboxDownloader {
     constructor() {
         // Initialize bot based on deployment mode
         if (DEPLOYMENT_MODE === 'webhook') {
@@ -80,8 +81,6 @@ class MultiPlatformDownloader {
     setupHandlers() {
         this.bot.onText(/\/start|\/help/, this.sendWelcomeMessage.bind(this));
         this.bot.onText(/\/download (.+)/, this.handleDownload.bind(this));
-        this.bot.onText(/\/convert/, this.handleConvertCommand.bind(this));
-        this.bot.onText(/\/settings/, this.handleSettingsCommand.bind(this));
     }
 
     sendWelcomeMessage(msg) {
@@ -92,46 +91,9 @@ class MultiPlatformDownloader {
             "Example: /download https://terabox.com/your_file_link\n\n" +
             "Supported platforms:\n" + 
             SUPPORTED_DOMAINS.map(domain => `• ${domain}`).join('\n') + "\n\n" +
-            "You can also convert videos to MP4 format during download.\n" +
-            "Use /settings to configure your preferences.\n" +
-            "Use /convert to learn about video conversion options.\n\n" +
-            "Files will be sent to you and optionally to the dump channel.";
+            "Files will be sent to you directly from the best available server.";
         
         this.bot.sendMessage(chatId, welcomeText);
-    }
-
-    handleConvertCommand(msg) {
-        const chatId = msg.chat.id;
-        const helpText = 
-            "To convert a file to MP4 format:\n" +
-            "1. Use /download [URL] to process your file\n" +
-            "2. Select 'Download & Convert to MP4' option\n\n" +
-            "⚠️ Note: Conversion works best with video files and may take some time depending on file size.";
-        
-        this.bot.sendMessage(chatId, helpText);
-    }
-
-    handleSettingsCommand(msg) {
-        const chatId = msg.chat.id;
-        const settingsText = 
-            "⚙️ Settings\n\n" +
-            "Choose your preferred API for Terabox downloads:";
-        
-        const settingsKeyboard = {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: 'RapidAPI (Default)', callback_data: 'settings_api_rapid' },
-                        { text: 'AlphaAPIs', callback_data: 'settings_api_alpha' }
-                    ],
-                    [
-                        { text: 'Auto (Try Both)', callback_data: 'settings_api_auto' }
-                    ]
-                ]
-            }
-        };
-        
-        this.bot.sendMessage(chatId, settingsText, settingsKeyboard);
     }
 
     formatFileSize(sizeBytes) {
@@ -248,6 +210,60 @@ class MultiPlatformDownloader {
         }
     }
 
+    // Try to fetch from both APIs and return the best result
+    async getBestTeraboxDetails(url) {
+        let rapidAPIResult = null;
+        let alphaAPIResult = null;
+        let rapidAPIError = null;
+        let alphaAPIError = null;
+        
+        // Try RapidAPI
+        try {
+            rapidAPIResult = await this.fetchTeraboxDetailsFromRapidAPI(url);
+        } catch (error) {
+            rapidAPIError = error;
+        }
+        
+        // Try AlphaAPI
+        try {
+            alphaAPIResult = await this.fetchTeraboxDetailsFromAlphaAPI(url);
+        } catch (error) {
+            alphaAPIError = error;
+        }
+        
+        // If both failed, throw error
+        if (!rapidAPIResult && !alphaAPIResult) {
+            throw new Error(`Both APIs failed. RapidAPI: ${rapidAPIError?.message || 'Unknown error'}, AlphaAPI: ${alphaAPIError?.message || 'Unknown error'}`);
+        }
+        
+        // If only one succeeded, return that one
+        if (rapidAPIResult && !alphaAPIResult) {
+            return { details: rapidAPIResult, source: 'RapidAPI' };
+        }
+        
+        if (!rapidAPIResult && alphaAPIResult) {
+            return { details: alphaAPIResult, source: 'AlphaAPI' };
+        }
+        
+        // If both succeeded, compare and return the best one
+        // Prefer the one with fast link
+        if (rapidAPIResult.fastlink && rapidAPIResult.fastlink !== 'N/A') {
+            return { details: rapidAPIResult, source: 'RapidAPI' };
+        }
+        
+        if (alphaAPIResult.fastlink && alphaAPIResult.fastlink !== 'N/A') {
+            return { details: alphaAPIResult, source: 'AlphaAPI' };
+        }
+        
+        // If no fast links, prefer the one with direct link
+        if (rapidAPIResult.link && rapidAPIResult.link !== 'N/A') {
+            return { details: rapidAPIResult, source: 'RapidAPI' };
+        }
+        
+        // Default to AlphaAPI if both have similar capabilities
+        return { details: alphaAPIResult, source: 'AlphaAPI' };
+    }
+
     async handleDownload(msg, match) {
         const chatId = msg.chat.id;
         const url = match[1];
@@ -265,40 +281,8 @@ class MultiPlatformDownloader {
             // Show typing indicator
             this.bot.sendChatAction(chatId, 'typing');
 
-            let fileDetails;
-            let apiSource = '';
-            
-            // Try different APIs based on preference (default: RapidAPI first, then AlphaAPI)
-            // In a real bot, we would save user preferences
-            const userPreference = 'auto'; // Could be 'rapid', 'alpha', or 'auto'
-            
-            if (userPreference === 'rapid' || userPreference === 'auto') {
-                try {
-                    fileDetails = await this.fetchTeraboxDetailsFromRapidAPI(url);
-                    apiSource = 'RapidAPI';
-                } catch (rapidError) {
-                    console.log('RapidAPI failed, trying AlphaAPI:', rapidError.message);
-                    if (userPreference === 'auto') {
-                        // If auto, try the other API
-                        try {
-                            fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
-                            apiSource = 'AlphaAPI';
-                        } catch (alphaError) {
-                            throw new Error(`Both APIs failed. RapidAPI: ${rapidError.message}, AlphaAPI: ${alphaError.message}`);
-                        }
-                    } else {
-                        // If not auto, just throw the error
-                        throw rapidError;
-                    }
-                }
-            } else if (userPreference === 'alpha') {
-                try {
-                    fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
-                    apiSource = 'AlphaAPI';
-                } catch (alphaError) {
-                    throw alphaError;
-                }
-            }
+            // Get the best details from available APIs
+            const { details: fileDetails, source: apiSource } = await this.getBestTeraboxDetails(url);
             
             // Verify we have valid file details
             if (!fileDetails || !fileDetails.file_name) {
@@ -320,56 +304,73 @@ class MultiPlatformDownloader {
                 throw new Error('No download links available for this file.');
             }
 
-            // Check if it's likely a video based on extension or file_type
-            const fileExt = path.extname(fileDetails.file_name).toLowerCase();
-            const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.3gp'];
-            const isLikelyVideo = 
-                videoExtensions.includes(fileExt) || 
-                (fileDetails.file_type && fileDetails.file_type.startsWith('video/'));
-
-            // Prepare download options
-            const downloadOptions = {
-                reply_markup: {
-                    inline_keyboard: [
-                        // If fast link is available, prefer it
-                        hasFastLink ? [
-                            {
-                                text: '📥 Download Original',
-                                callback_data: `fast_original_${chatId}_${fileDetails.file_name.substring(0, 20)}`
-                            }
-                        ] : [],
-                        // Fall back to direct link if fast link isn't available
-                        !hasFastLink && hasDirectLink ? [
-                            {
-                                text: '📥 Download Original',
-                                callback_data: `direct_original_${chatId}_${fileDetails.file_name.substring(0, 20)}`
-                            }
-                        ] : [],
-                        // Add MP4 conversion option only if it's likely a video
-                        isLikelyVideo ? [
-                            {
-                                text: '🎬 Download & Convert to MP4',
-                                callback_data: `${hasFastLink ? 'fast' : 'direct'}_mp4_${chatId}_${fileDetails.file_name.substring(0, 20)}`
-                            }
-                        ] : []
-                    ].filter(row => row.length > 0)
-                }
-            };
-
-            // Store file details for callback use
-            this.fileDetailsMap.set(chatId.toString(), {
-                ...fileDetails,
-                originalUrl: url,
-                serviceProvider,
-                apiSource
-            });
-
-            // Update the status message with file details and download options
-            this.bot.editMessageText(detailsMessage, {
+            // Update the message with file details
+            await this.bot.editMessageText(`${detailsMessage}\n\nStarting download...`, {
                 chat_id: chatId,
-                message_id: statusMsg.message_id,
-                reply_markup: downloadOptions.reply_markup
+                message_id: statusMsg.message_id
             });
+
+            // Choose the best link
+            let downloadLink;
+            if (hasFastLink) {
+                downloadLink = fileDetails.fastlink;
+            } else if (hasDirectLink) {
+                downloadLink = fileDetails.link;
+            } else {
+                throw new Error('No valid download link available for this file.');
+            }
+
+            // Show download status
+            this.bot.sendChatAction(chatId, 'upload_document');
+            
+            // Start the download
+            await this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading file...`, {
+                chat_id: chatId,
+                message_id: statusMsg.message_id
+            });
+            
+            try {
+                // For files smaller than 50MB, download and send via bot
+                if ((Number(fileDetails.sizebytes) < 50 * 1024 * 1024) || 
+                    (fileDetails.file_size && fileDetails.file_size.includes('MB') && 
+                     parseFloat(fileDetails.file_size) < 50)) {
+                    
+                    const filePath = await this.downloadAndSendFile(chatId, downloadLink, fileDetails.file_name, statusMsg.message_id, detailsMessage);
+                    
+                    // Send to dump channel if configured
+                    if (DUMP_CHANNEL_ID) {
+                        try {
+                            await this.bot.sendDocument(DUMP_CHANNEL_ID, filePath, {
+                                caption: `📁 File Name: ${fileDetails.file_name}\n` +
+                                         `📊 File Size: ${this.formatFileSize(fs.statSync(filePath).size)}\n` +
+                                         `🔗 Original URL: ${url}\n` +
+                                         `🌐 Source: ${serviceProvider}\n` +
+                                         `🔌 API: ${apiSource}`
+                            });
+                        } catch (channelError) {
+                            console.error('Error sending to dump channel:', channelError);
+                        }
+                    }
+                    
+                    // Clean up
+                    try {
+                        fs.unlinkSync(filePath);
+                    } catch (unlinkError) {
+                        console.error('Error removing temp file:', unlinkError);
+                    }
+                    
+                } else {
+                    // For larger files, send direct link
+                    await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Use the direct download link:\n\n${downloadLink}`, {
+                        chat_id: chatId,
+                        message_id: statusMsg.message_id,
+                        disable_web_page_preview: false
+                    });
+                }
+            } catch (dlError) {
+                throw new Error(`Download failed: ${dlError.message}`);
+            }
+            
         } catch (error) {
             console.error('Download error:', error);
             
@@ -381,7 +382,7 @@ class MultiPlatformDownloader {
         }
     }
 
-    async downloadFile(downloadLink, fileName) {
+    async downloadAndSendFile(chatId, downloadLink, fileName, statusMsgId, detailsMessage) {
         try {
             console.log(`Downloading from: ${downloadLink}`);
             
@@ -390,7 +391,7 @@ class MultiPlatformDownloader {
                 url: downloadLink,
                 responseType: 'stream',
                 timeout: 120000, // 120 second timeout
-                maxContentLength: 1024 * 1024 * 1024, // 1GB limit
+                maxContentLength: 100 * 1024 * 1024, // 100MB limit
                 validateStatus: function (status) {
                     return status >= 200 && status < 300; // only accept 2xx status codes
                 },
@@ -411,7 +412,45 @@ class MultiPlatformDownloader {
             response.data.pipe(writer);
 
             return new Promise((resolve, reject) => {
-                writer.on('finish', () => resolve(filePath));
+                let totalBytes = 0;
+                let lastUpdateTime = Date.now();
+                
+                response.data
+                .on('data', (chunk) => {
+                    totalBytes += chunk.length;
+                    
+                    // Update progress every 3 seconds
+                    const now = Date.now();
+                    if (now - lastUpdateTime > 3000) {
+                        this.bot.editMessageText(`${detailsMessage}\n\n📥 Downloading: ${this.formatFileSize(totalBytes)} received...`, {
+                            chat_id: chatId,
+                            message_id: statusMsgId
+                        }).catch(err => console.error('Error updating progress:', err));
+                        
+                        lastUpdateTime = now;
+                    }
+                });
+                
+                writer.on('finish', async () => {
+                    await this.bot.editMessageText(`${detailsMessage}\n\n📤 Download complete! Sending file...`, {
+                        chat_id: chatId,
+                        message_id: statusMsgId
+                    });
+                    
+                    // Send the file
+                    await this.bot.sendDocument(chatId, filePath, {
+                        caption: `📁 File: ${fileName}`
+                    });
+                    
+                    // Update status message
+                    await this.bot.editMessageText(`${detailsMessage}\n\n✅ File sent successfully!`, {
+                        chat_id: chatId,
+                        message_id: statusMsgId
+                    });
+                    
+                    resolve(filePath);
+                });
+                
                 writer.on('error', reject);
                 
                 // Add a timeout for large files
@@ -426,7 +465,7 @@ class MultiPlatformDownloader {
                     } else {
                         reject(new Error('Download failed - no file created'));
                     }
-                }, 600000); // 10 minutes timeout for very large files
+                }, 300000); // 5 minutes timeout
             });
         } catch (error) {
             console.error('File download error:', error);
@@ -434,215 +473,13 @@ class MultiPlatformDownloader {
         }
     }
 
-    async detectVideoFile(filePath) {
-        try {
-            // Use file-type to detect the file type
-            const type = await fileType.fromFile(filePath);
-            
-            if (!type) return false;
-            
-            // Check if it's a video file
-            const videoTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/mpeg'];
-            return videoTypes.includes(type.mime);
-        } catch (error) {
-            console.error('Error detecting file type:', error);
-            return false;
-        }
-    }
-
-    async convertToMp4(filePath, outputFilename) {
-        // First check if the file is already a valid video
-        const isVideo = await this.detectVideoFile(filePath);
-        if (!isVideo) {
-            throw new Error('The file does not appear to be a valid video file.');
-        }
-
-        // Create output path
-        const outputPath = path.join(CONVERTED_DIR, outputFilename);
-        
-        try {
-            // Run ffmpeg to convert the file
-            const command = `ffmpeg -i "${filePath}" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k "${outputPath}"`;
-            
-            // Send progress status
-            console.log(`Running conversion: ${command}`);
-            
-            // Execute the command
-            await execPromise(command);
-            
-            // Verify the output file exists
-            if (!fs.existsSync(outputPath)) {
-                throw new Error('Conversion failed: Output file not created');
-            }
-            
-            return outputPath;
-        } catch (error) {
-            console.error('Conversion error:', error);
-            throw new Error(`Failed to convert file to MP4: ${error.message}`);
-        }
-    }
-
-    // Register handlers for all callbacks
-    registerCallbackHandlers() {
-        this.bot.on('callback_query', async (callbackQuery) => {
-            const data = callbackQuery.data;
-            const chatId = callbackQuery.message.chat.id;
-            
-            // Handle settings callbacks
-            if (data.startsWith('settings_')) {
-                await this.handleSettingsCallback(callbackQuery);
-                return;
-            }
-            
-            // Handle download callbacks
-            if (data.includes('_original_') || data.includes('_mp4_')) {
-                await this.handleDownloadCallback(callbackQuery);
-                return;
-            }
-        });
-    }
-    
-    async handleSettingsCallback(callbackQuery) {
-        const data = callbackQuery.data;
-        const chatId = callbackQuery.message.chat.id;
-        
-        let settingValue = data.split('settings_api_')[1];
-        let responseText = '';
-        
-        switch(settingValue) {
-            case 'rapid':
-                responseText = '✅ Settings updated: Using RapidAPI for Terabox downloads';
-                break;
-            case 'alpha':
-                responseText = '✅ Settings updated: Using AlphaAPIs for Terabox downloads';
-                break;
-            case 'auto':
-                responseText = '✅ Settings updated: Auto mode - will try both APIs for best results';
-                break;
-            default:
-                responseText = '❌ Invalid setting';
-        }
-        
-        // Acknowledge the callback query
-        await this.bot.answerCallbackQuery(callbackQuery.id);
-        
-        // Update the message
-        await this.bot.editMessageText(responseText, {
-            chat_id: chatId,
-            message_id: callbackQuery.message.message_id
-        });
-    }
-
-    async handleDownloadCallback(callbackQuery) {
-        const data = callbackQuery.data;
-        const [downloadType, conversionType, chatIdStr, fileNamePart] = data.split('_');
-        const chatId = callbackQuery.message.chat.id;
-
-        try {
-            // Acknowledge the callback query immediately
-            await this.bot.answerCallbackQuery(callbackQuery.id, { 
-                text: 'Processing your download request...' 
-            });
-
-            // Send a processing message
-            await this.bot.sendMessage(chatId, "⏳ Starting download, please wait...");
-            
-            // Show download status
-            this.bot.sendChatAction(chatId, 'upload_document');
-
-            // Get file details from map
-            const fileDetails = this.fileDetailsMap.get(chatIdStr);
-            
-            if (!fileDetails) {
-                throw new Error('File details not found. Please try downloading again.');
-            }
-
-            let downloadLink;
-            if (downloadType === 'direct' && fileDetails.link && fileDetails.link !== 'N/A') {
-                downloadLink = fileDetails.link;
-            } else if (downloadType === 'fast' && fileDetails.fastlink && fileDetails.fastlink !== 'N/A') {
-                downloadLink = fileDetails.fastlink;
-            } else {
-                throw new Error('No valid download link available for this file.');
-            }
-
-            // Download file
-            await this.bot.sendMessage(chatId, "📥 Downloading file...");
-            const filePath = await this.downloadFile(downloadLink, fileDetails.file_name);
-
-            let finalFilePath = filePath;
-            let fileName = fileDetails.file_name;
-            
-            // Check if conversion is requested
-            if (conversionType === 'mp4') {
-                await this.bot.sendMessage(chatId, "🔄 Converting file to MP4 format...");
-                
-                // Generate MP4 filename
-                const fileNameWithoutExt = path.parse(fileDetails.file_name).name;
-                const mp4FileName = `${fileNameWithoutExt}.mp4`;
-                
-                try {
-                    // Convert the file
-                    finalFilePath = await this.convertToMp4(filePath, mp4FileName);
-                    fileName = mp4FileName;
-                    
-                    await this.bot.sendMessage(chatId, "✅ Conversion completed successfully!");
-                } catch (convError) {
-                    await this.bot.sendMessage(chatId, `⚠️ Conversion failed: ${convError.message}\nSending original file instead.`);
-                    // If conversion fails, use the original file
-                    finalFilePath = filePath;
-                }
-            }
-
-            // Send file to user
-            await this.bot.sendMessage(chatId, "📤 Uploading file to Telegram...");
-            await this.bot.sendDocument(chatId, finalFilePath, {
-                caption: `📁 File: ${fileName}`
-            });
-
-            // Optional: Send to dump channel
-            if (DUMP_CHANNEL_ID) {
-                try {
-                    await this.bot.sendDocument(DUMP_CHANNEL_ID, finalFilePath, {
-                        caption: `📁 File Name: ${fileName}\n` +
-                                 `📊 File Size: ${this.formatFileSize(fs.statSync(finalFilePath).size)}\n` +
-                                 `🔗 Original URL: ${fileDetails.originalUrl}\n` +
-                                 `🌐 Source: ${fileDetails.serviceProvider}\n` +
-                                 `🔌 API: ${fileDetails.apiSource}`
-                    });
-                } catch (channelError) {
-                    console.error('Error sending to dump channel:', channelError);
-                    // Don't throw - this is a non-critical error
-                }
-            }
-
-            // Clean up
-            try {
-                fs.unlinkSync(filePath);
-                if (finalFilePath !== filePath && fs.existsSync(finalFilePath)) {
-                    fs.unlinkSync(finalFilePath);
-                }
-            } catch (unlinkError) {
-                console.error('Error removing temp file:', unlinkError);
-            }
-
-            // Notify success
-            await this.bot.sendMessage(chatId, "✅ Download completed successfully!");
-            
-        } catch (error) {
-            console.error('Callback query error:', error);
-            this.bot.sendMessage(chatId, `⚠️ Download failed: ${error.message}`);
-        }
-    }
-
     start() {
-        this.registerCallbackHandlers();
         console.log(`Bot started in ${DEPLOYMENT_MODE} mode`);
     }
 }
 
 // Initialize the bot
-const bot = new MultiPlatformDownloader();
+const bot = new TeraboxDownloader();
 bot.start();
 
 // Start Express server with explicit host binding
