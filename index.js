@@ -38,34 +38,17 @@ const app = express();
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Multi-Platform Downloader Bot with MP4 Conversion is running');
+    res.send('Terabox Downloader Bot with MP4 Conversion is running');
 });
 
 // Log the environment for debugging
 console.log(`Starting application with PORT=${PORT}, MODE=${DEPLOYMENT_MODE}`);
 
-// Supported domains
+// Supported domains - Only TeraBox as requested
 const SUPPORTED_DOMAINS = [
     'terabox.com',
-    '1drv.ms',
-    'mega.nz',
-    'mediafire.com',
-    'drive.google.com',
-    'dropbox.com',
-    'onedrive.live.com',
-    'sendspace.com',
-    'box.com',
-    '4shared.com',
-    'wetransfer.com',
-    'filemail.com',
-    'yandex.disk',
-    'fshare.vn',
-    'solidfiles.com',
-    'zippyshare.com',
-    'racaty.net',
-    'files.fm',
-    'file-upload.com',
-    'gofile.io'
+    'teraboxapp.com',
+    '1drv.ms' // Keep this as it's related to TeraBox
 ];
 
 class MultiPlatformDownloader {
@@ -104,7 +87,7 @@ class MultiPlatformDownloader {
     sendWelcomeMessage(msg) {
         const chatId = msg.chat.id;
         const welcomeText = 
-            "Welcome to Multi-Platform Downloader Bot! 📦\n" +
+            "Welcome to Terabox Downloader Bot! 📦\n" +
             "Send /download followed by a URL to download a file.\n" +
             "Example: /download https://terabox.com/your_file_link\n\n" +
             "Supported platforms:\n" + 
@@ -152,20 +135,29 @@ class MultiPlatformDownloader {
     }
 
     formatFileSize(sizeBytes) {
-        if (typeof sizeBytes === 'string' && sizeBytes.includes('MB') || sizeBytes.includes('GB')) {
-            return sizeBytes; // Already formatted
+        // Fix for the TypeError - Check if sizeBytes is a string
+        if (typeof sizeBytes === 'string') {
+            if (sizeBytes.includes('MB') || sizeBytes.includes('GB')) {
+                return sizeBytes; // Already formatted
+            }
+        }
+        
+        // Make sure sizeBytes is a number for calculation
+        const size = Number(sizeBytes);
+        if (isNaN(size)) {
+            return 'Unknown size'; // Handle invalid input
         }
         
         const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        let size = Number(sizeBytes);
+        let convertedSize = size;
         let unitIndex = 0;
 
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
+        while (convertedSize >= 1024 && unitIndex < units.length - 1) {
+            convertedSize /= 1024;
             unitIndex++;
         }
 
-        return `${size.toFixed(2)} ${units[unitIndex]}`;
+        return `${convertedSize.toFixed(2)} ${units[unitIndex]}`;
     }
 
     getServiceProvider(url) {
@@ -267,53 +259,45 @@ class MultiPlatformDownloader {
             // Check if URL is from a supported service
             const serviceProvider = this.getServiceProvider(url);
             if (!serviceProvider) {
-                throw new Error(`Unsupported URL. Please provide a link from one of the supported services:\n${SUPPORTED_DOMAINS.join(', ')}`);
+                throw new Error(`Unsupported URL. Please provide a Terabox link from one of the supported domains:\n${SUPPORTED_DOMAINS.join(', ')}`);
             }
 
             // Show typing indicator
             this.bot.sendChatAction(chatId, 'typing');
 
-            // For now, we only have direct API integration with Terabox
-            // For other services, we'll need to implement specific handlers
             let fileDetails;
             let apiSource = '';
             
-            if (serviceProvider === 'terabox.com' || serviceProvider === '1drv.ms') {
-                // Try different APIs based on preference (default: RapidAPI first, then AlphaAPI)
-                // In a real bot, we would save user preferences
-                const userPreference = 'auto'; // Could be 'rapid', 'alpha', or 'auto'
-                
-                if (userPreference === 'rapid' || userPreference === 'auto') {
-                    try {
-                        fileDetails = await this.fetchTeraboxDetailsFromRapidAPI(url);
-                        apiSource = 'RapidAPI';
-                    } catch (rapidError) {
-                        console.log('RapidAPI failed, trying AlphaAPI:', rapidError.message);
-                        if (userPreference === 'auto') {
-                            // If auto, try the other API
-                            try {
-                                fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
-                                apiSource = 'AlphaAPI';
-                            } catch (alphaError) {
-                                throw new Error(`Both APIs failed. RapidAPI: ${rapidError.message}, AlphaAPI: ${alphaError.message}`);
-                            }
-                        } else {
-                            // If not auto, just throw the error
-                            throw rapidError;
+            // Try different APIs based on preference (default: RapidAPI first, then AlphaAPI)
+            // In a real bot, we would save user preferences
+            const userPreference = 'auto'; // Could be 'rapid', 'alpha', or 'auto'
+            
+            if (userPreference === 'rapid' || userPreference === 'auto') {
+                try {
+                    fileDetails = await this.fetchTeraboxDetailsFromRapidAPI(url);
+                    apiSource = 'RapidAPI';
+                } catch (rapidError) {
+                    console.log('RapidAPI failed, trying AlphaAPI:', rapidError.message);
+                    if (userPreference === 'auto') {
+                        // If auto, try the other API
+                        try {
+                            fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
+                            apiSource = 'AlphaAPI';
+                        } catch (alphaError) {
+                            throw new Error(`Both APIs failed. RapidAPI: ${rapidError.message}, AlphaAPI: ${alphaError.message}`);
                         }
-                    }
-                } else if (userPreference === 'alpha') {
-                    try {
-                        fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
-                        apiSource = 'AlphaAPI';
-                    } catch (alphaError) {
-                        throw alphaError;
+                    } else {
+                        // If not auto, just throw the error
+                        throw rapidError;
                     }
                 }
-            } else {
-                // For other platforms, we'll add implementations later
-                // For now, set a placeholder message
-                throw new Error(`Direct download from ${serviceProvider} is not yet implemented. Support for additional platforms coming soon!`);
+            } else if (userPreference === 'alpha') {
+                try {
+                    fileDetails = await this.fetchTeraboxDetailsFromAlphaAPI(url);
+                    apiSource = 'AlphaAPI';
+                } catch (alphaError) {
+                    throw alphaError;
+                }
             }
             
             // Verify we have valid file details
