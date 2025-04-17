@@ -32,6 +32,7 @@
             overflow: hidden;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             margin-bottom: 20px;
+            aspect-ratio: 16/9;
         }
         
         .plyr {
@@ -48,6 +49,7 @@
             font-size: 24px;
             margin-bottom: 20px;
             color: #e91e63;
+            word-break: break-word;
         }
         
         .video-info {
@@ -102,6 +104,7 @@
             border-radius: 50%;
             border-top: 5px solid #e91e63;
             animation: spin 1s linear infinite;
+            z-index: 5;
         }
         
         @keyframes spin {
@@ -111,6 +114,7 @@
         
         #video-player {
             width: 100%;
+            height: 100%;
             max-height: 70vh;
         }
         
@@ -168,6 +172,30 @@
             z-index: 10;
         }
         
+        .iframe-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+            display: none;
+        }
+        
+        .iframe-container iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        
+        .try-methods {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: rgba(52, 152, 219, 0.2);
+            border-left: 4px solid #3498db;
+            border-radius: 4px;
+        }
+        
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .player-wrapper {
@@ -190,11 +218,29 @@
         
         <div class="player-wrapper">
             <div id="loading" class="loader"></div>
-            <div class="quality-badge" id="quality-badge">HD</div>
+            <div class="quality-badge" id="quality-badge">MP4</div>
+            
+            <!-- Regular video player -->
             <video id="video-player" playsinline controls>
                 <source id="video-source" type="video/mp4">
                 Your browser does not support the video tag.
             </video>
+            
+            <!-- Iframe fallback for problematic links -->
+            <div id="iframe-player" class="iframe-container"></div>
+        </div>
+        
+        <div id="error-container" class="error-message" style="display: none;">
+            <p id="error-message">There was an error loading the video.</p>
+            <div id="try-methods" class="try-methods" style="display: none;">
+                <p><strong>Try Alternative Methods:</strong></p>
+                <div class="d-grid gap-2">
+                    <button id="try-direct" class="btn btn-custom">Method 1: Direct Player</button>
+                    <button id="try-iframe" class="btn btn-custom">Method 2: Iframe Player</button>
+                    <button id="try-cors" class="btn btn-custom">Method 3: CORS Proxy</button>
+                    <button id="try-alternative" class="btn btn-custom">Method 4: Alternative Source</button>
+                </div>
+            </div>
         </div>
         
         <div class="player-controls">
@@ -220,7 +266,7 @@
             
             <div class="dropdown">
                 <button class="btn btn-custom dropdown-toggle" type="button" id="qualityDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="fas fa-cog"></i> Quality
+                    <i class="fas fa-cog"></i> Source
                 </button>
                 <ul class="dropdown-menu" aria-labelledby="qualityDropdown" id="quality-options">
                     <li><a class="dropdown-item" href="#" data-quality="primary">Primary Source</a></li>
@@ -228,13 +274,9 @@
                 </ul>
             </div>
             
-            <a id="download-btn" href="#" class="btn btn-primary" download>
+            <a id="download-btn" href="#" class="btn btn-primary" download target="_blank">
                 <i class="fas fa-download"></i> Download Video
             </a>
-        </div>
-        
-        <div id="error-container" class="error-message" style="display: none;">
-            <p id="error-message">There was an error loading the video.</p>
         </div>
         
         <div class="video-info">
@@ -268,9 +310,6 @@
     <!-- HLS.js for HLS streaming support -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.0/hls.min.js"></script>
     
-    <!-- DashJS for DASH streaming support -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.5.2/dash.all.min.js"></script>
-    
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Parse URL parameters
@@ -289,98 +328,105 @@
             
             // Select video elements
             const video = document.getElementById('video-player');
-            const videoSource = document.getElementById('video-source');
+            const videoPlayerSource = document.getElementById('video-source');
             const loading = document.getElementById('loading');
             const errorContainer = document.getElementById('error-container');
             const errorMessage = document.getElementById('error-message');
             const downloadBtn = document.getElementById('download-btn');
             const qualityOptions = document.getElementById('quality-options');
             const qualityBadge = document.getElementById('quality-badge');
+            const iframePlayer = document.getElementById('iframe-player');
+            const tryMethods = document.getElementById('try-methods');
             
-            // Initialize player
+            // Track playing method
+            let currentMethod = 'direct';
+            let currentUrl = videoUrl;
             let player = null;
             let hls = null;
-            let dash = null;
-            let currentUrl = videoUrl;
+            let loadAttempts = 0;
             
             // Set download link
             downloadBtn.href = videoUrl;
             
-            // Initialize media player
-            function initializePlayer(url) {
-                // Reset any existing players
-                if (player) {
-                    player.destroy();
-                }
-                if (hls) {
-                    hls.destroy();
-                }
-                if (dash) {
-                    dash.destroy();
-                }
+            // Initialize the player with direct method
+            initializeDirectPlayer(videoUrl);
+            
+            // Method 1: Direct player
+            function initializeDirectPlayer(url) {
+                resetPlayer();
+                currentMethod = 'direct';
                 
                 // Show loading
                 loading.style.display = 'block';
-                errorContainer.style.display = 'none';
+                video.style.display = 'block';
+                iframePlayer.style.display = 'none';
                 
-                // Check URL type
-                if (url.includes('.m3u8')) {
-                    // HLS Stream
-                    if (Hls.isSupported()) {
-                        hls = new Hls({
-                            maxBufferLength: 30,
-                            maxMaxBufferLength: 60
-                        });
-                        hls.loadSource(url);
-                        hls.attachMedia(video);
-                        
-                        hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                            loading.style.display = 'none';
-                            qualityBadge.innerText = 'HLS';
-                            initPlyr();
-                        });
-                        
-                        hls.on(Hls.Events.ERROR, function(event, data) {
-                            if (data.fatal) {
-                                showError('HLS streaming error: ' + data.type);
-                            }
-                        });
-                    } else {
-                        // Native HLS support
-                        videoSource.src = url;
-                        video.load();
-                        qualityBadge.innerText = 'HLS (Native)';
-                        initPlyr();
-                    }
-                } else if (url.includes('.mpd')) {
-                    // DASH Stream
-                    if (dashjs) {
-                        dash = dashjs.MediaPlayer().create();
-                        dash.initialize(video, url, true);
-                        dash.on('error', function(e) {
-                            showError('DASH streaming error');
-                        });
-                        qualityBadge.innerText = 'DASH';
-                        initPlyr();
-                    } else {
-                        showError('DASH.js is not loaded or supported');
-                    }
-                } else {
-                    // Regular MP4 or other direct video
-                    videoSource.src = url;
-                    video.load();
-                    qualityBadge.innerText = 'MP4';
-                    initPlyr();
-                    
-                    // Add error handling for direct videos
-                    video.onerror = function() {
-                        showError('Video failed to load. The link may have expired or is invalid.');
-                    };
-                }
+                // Set source
+                videoPlayerSource.src = url;
+                video.load();
+                
+                // Initialize Plyr
+                initPlyr();
+                
+                // Add error handling
+                video.onerror = function() {
+                    console.error('Video failed to load in direct mode');
+                    showError('Video failed to load. Trying alternative methods...', true);
+                };
+            }
+            
+            // Method 2: Iframe player
+            function initializeIframePlayer(url) {
+                resetPlayer();
+                currentMethod = 'iframe';
+                
+                // Show loading
+                loading.style.display = 'block';
+                video.style.display = 'none';
+                iframePlayer.style.display = 'block';
+                
+                // Create iframe
+                iframePlayer.innerHTML = `<iframe src="${url}" allowfullscreen></iframe>`;
+                
+                // Hide loading after a delay
+                setTimeout(() => {
+                    loading.style.display = 'none';
+                }, 2000);
+            }
+            
+            // Method 3: CORS Proxy
+            function initializeProxyPlayer(url) {
+                resetPlayer();
+                currentMethod = 'proxy';
+                
+                // Show loading
+                loading.style.display = 'block';
+                video.style.display = 'block';
+                iframePlayer.style.display = 'none';
+                
+                // Try with CORS proxy
+                const corsProxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
+                
+                // Set source
+                videoPlayerSource.src = corsProxyUrl;
+                video.load();
+                
+                // Initialize Plyr
+                initPlyr();
+                
+                // Add error handling
+                video.onerror = function() {
+                    console.error('Video failed to load with CORS proxy');
+                    showError('Video failed to load with CORS proxy. Try the download link instead.', true);
+                };
             }
             
             // Initialize Plyr after video source is set
             function initPlyr() {
+                if (player) {
+                    player.destroy();
+                }
+                
                 player = new Plyr('#video-player', {
                     controls: [
                         'play-large', 'play', 'progress', 'current-time', 'mute', 
@@ -389,36 +435,68 @@
                     settings: ['captions', 'quality', 'speed'],
                     speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
                     keyboard: { focused: true, global: true },
-                    tooltips: { controls: true, seek: true }
+                    autoplay: false
                 });
                 
                 player.on('ready', function() {
                     loading.style.display = 'none';
+                    errorContainer.style.display = 'none';
                 });
                 
                 player.on('error', function(event) {
-                    showError('Player error: The video might be unavailable or the format is not supported.');
+                    if (loadAttempts < 2) {
+                        // Try reloading once
+                        loadAttempts++;
+                        video.load();
+                        player.play().catch(err => console.error('Autoplay prevented:', err));
+                    } else {
+                        showError('Player error: The video might be unavailable or the format is not supported.', true);
+                    }
                 });
             }
             
+            // Reset player state
+            function resetPlayer() {
+                if (player) {
+                    player.destroy();
+                    player = null;
+                }
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+                loadAttempts = 0;
+                errorContainer.style.display = 'none';
+            }
+            
             // Show error message
-            function showError(message) {
+            function showError(message, showMethodOptions = false) {
                 loading.style.display = 'none';
                 errorContainer.style.display = 'block';
                 errorMessage.innerText = message;
+                
+                if (showMethodOptions) {
+                    tryMethods.style.display = 'block';
+                } else {
+                    tryMethods.style.display = 'none';
+                }
             }
             
             // Video player controls
             document.getElementById('play-btn').addEventListener('click', function() {
-                if (player) player.play();
+                if (currentMethod === 'direct' && player) {
+                    player.play();
+                }
             });
             
             document.getElementById('pause-btn').addEventListener('click', function() {
-                if (player) player.pause();
+                if (currentMethod === 'direct' && player) {
+                    player.pause();
+                }
             });
             
             document.getElementById('increase-speed').addEventListener('click', function() {
-                if (player) {
+                if (currentMethod === 'direct' && player) {
                     let currentSpeed = player.speed;
                     if (currentSpeed < 2) {
                         player.speed = currentSpeed + 0.25;
@@ -427,11 +505,34 @@
             });
             
             document.getElementById('decrease-speed').addEventListener('click', function() {
-                if (player) {
+                if (currentMethod === 'direct' && player) {
                     let currentSpeed = player.speed;
                     if (currentSpeed > 0.5) {
                         player.speed = currentSpeed - 0.25;
                     }
+                }
+            });
+            
+            // Set up alternative playback methods
+            document.getElementById('try-direct').addEventListener('click', function() {
+                initializeDirectPlayer(currentUrl);
+            });
+            
+            document.getElementById('try-iframe').addEventListener('click', function() {
+                initializeIframePlayer(currentUrl);
+            });
+            
+            document.getElementById('try-cors').addEventListener('click', function() {
+                initializeProxyPlayer(currentUrl);
+            });
+            
+            document.getElementById('try-alternative').addEventListener('click', function() {
+                if (alternativeUrl) {
+                    currentUrl = alternativeUrl;
+                    downloadBtn.href = alternativeUrl;
+                    initializeDirectPlayer(alternativeUrl);
+                } else {
+                    showError('No alternative source available for this video.');
                 }
             });
             
@@ -441,24 +542,36 @@
                     e.preventDefault();
                     currentUrl = videoUrl;
                     downloadBtn.href = videoUrl;
-                    initializePlayer(videoUrl);
+                    
+                    if (currentMethod === 'direct') {
+                        initializeDirectPlayer(videoUrl);
+                    } else if (currentMethod === 'iframe') {
+                        initializeIframePlayer(videoUrl);
+                    } else if (currentMethod === 'proxy') {
+                        initializeProxyPlayer(videoUrl);
+                    }
                 });
                 
                 document.querySelector('[data-quality="alternative"]').addEventListener('click', function(e) {
                     e.preventDefault();
                     currentUrl = alternativeUrl;
                     downloadBtn.href = alternativeUrl;
-                    initializePlayer(alternativeUrl);
+                    
+                    if (currentMethod === 'direct') {
+                        initializeDirectPlayer(alternativeUrl);
+                    } else if (currentMethod === 'iframe') {
+                        initializeIframePlayer(alternativeUrl);
+                    } else if (currentMethod === 'proxy') {
+                        initializeProxyPlayer(alternativeUrl);
+                    }
                 });
             } else {
                 // Hide alternative option if not available
                 document.querySelector('[data-quality="alternative"]').parentNode.style.display = 'none';
             }
             
-            // Start the player with the primary URL
-            if (videoUrl) {
-                initializePlayer(videoUrl);
-            } else {
+            // Check if we have valid URLs
+            if (!videoUrl) {
                 showError('No video URL provided.');
             }
         });
