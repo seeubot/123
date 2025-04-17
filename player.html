@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terabox Video Player</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            width: 100%;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background-color: #1a1a1a;
+            padding: 15px 0;
+            text-align: center;
+            border-bottom: 1px solid #333;
+        }
+        h1 {
+            margin: 0;
+            color: #ffffff;
+        }
+        .video-container {
+            margin: 20px 0;
+            flex: 1;
+            background-color: #000;
+            position: relative;
+            overflow: hidden;
+            width: 100%;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+        }
+        .video-container video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .file-info {
+            background-color: #1a1a1a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .file-info p {
+            margin: 5px 0;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            background-color: #3a8efa;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn:hover {
+            background-color: #2b7de9;
+        }
+        .btn-alt {
+            background-color: #555;
+        }
+        .btn-alt:hover {
+            background-color: #666;
+        }
+        .error-message {
+            color: #ff6b6b;
+            background-color: rgba(255, 107, 107, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 20px 0;
+            display: none;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 10;
+        }
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3a8efa;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        footer {
+            text-align: center;
+            padding: 20px;
+            background-color: #1a1a1a;
+            border-top: 1px solid #333;
+            margin-top: 20px;
+        }
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+            }
+            .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Terabox Video Player</h1>
+    </header>
+    
+    <div class="container">
+        <div class="file-info">
+            <p><strong>File Name:</strong> <span id="fileName">Loading...</span></p>
+            <p><strong>File Size:</strong> <span id="fileSize">Loading...</span></p>
+            <p><strong>Source:</strong> <span id="fileSource">Loading...</span></p>
+        </div>
+        
+        <div class="video-container">
+            <div class="loading" id="loadingIndicator">
+                <div class="loading-spinner"></div>
+            </div>
+            <video id="videoPlayer" controls controlsList="nodownload">
+                <source id="videoSource" src="" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+        
+        <div class="error-message" id="errorMessage">
+            Error loading video. Please try the direct download link instead.
+        </div>
+        
+        <div class="controls">
+            <a href="#" class="btn" id="downloadBtn" download>Download Video</a>
+            <a href="#" class="btn btn-alt" id="altDownloadBtn" style="display: none;" download>Alternative Download</a>
+            <button class="btn" id="fullscreenBtn">Fullscreen</button>
+        </div>
+    </div>
+    
+    <footer>
+        Terabox Downloader Bot | Video Player
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Parse URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoUrl = urlParams.get('url');
+            const fileName = urlParams.get('name');
+            const fileSize = urlParams.get('size');
+            const fileSource = urlParams.get('source');
+            const altUrl = urlParams.get('alt');
+            
+            // Update page with file information
+            document.getElementById('fileName').textContent = fileName || 'Unknown';
+            document.getElementById('fileSize').textContent = fileSize || 'Unknown';
+            document.getElementById('fileSource').textContent = fileSource || 'Terabox';
+            
+            // Set video source and download button
+            const videoPlayer = document.getElementById('videoPlayer');
+            const videoSource = document.getElementById('videoSource');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const altDownloadBtn = document.getElementById('altDownloadBtn');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorMessage = document.getElementById('errorMessage');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            
+            if (videoUrl) {
+                videoSource.src = videoUrl;
+                downloadBtn.href = videoUrl;
+                downloadBtn.setAttribute('download', fileName || 'terabox_video');
+                
+                // Set up alternative download if available
+                if (altUrl) {
+                    altDownloadBtn.href = altUrl;
+                    altDownloadBtn.setAttribute('download', fileName || 'terabox_video');
+                    altDownloadBtn.style.display = 'inline-block';
+                }
+                
+                // Load the video
+                videoPlayer.load();
+                
+                // Handle video load events
+                videoPlayer.addEventListener('loadeddata', function() {
+                    loadingIndicator.style.display = 'none';
+                });
+                
+                videoPlayer.addEventListener('error', function() {
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.style.display = 'block';
+                    console.error('Video loading error');
+                });
+                
+                // Try to autoplay (may be blocked by browser policy)
+                videoPlayer.play().catch(function(error) {
+                    console.warn('Autoplay prevented:', error);
+                });
+            } else {
+                loadingIndicator.style.display = 'none';
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = 'Error: No video URL provided';
+            }
+            
+            // Fullscreen button functionality
+            fullscreenBtn.addEventListener('click', function() {
+                if (videoPlayer.requestFullscreen) {
+                    videoPlayer.requestFullscreen();
+                } else if (videoPlayer.webkitRequestFullscreen) {
+                    videoPlayer.webkitRequestFullscreen();
+                } else if (videoPlayer.msRequestFullscreen) {
+                    videoPlayer.msRequestFullscreen();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
