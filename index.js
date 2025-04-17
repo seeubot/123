@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const dotenv = require('dotenv');
 const url = require('url');
+const crypto = require('crypto'); // For generating secure tokens
 
 // Load environment variables
 dotenv.config();
@@ -16,12 +17,16 @@ const DUMP_CHANNEL_ID = process.env.DUMP_CHANNEL_ID;
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || 'https://one23-p9z6.onrender.com';
 const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'polling';
+const SECRET_KEY = process.env.SECRET_KEY || BOT_TOKEN; // Use bot token as fallback secret
 
 // Ensure download directory exists
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
 if (!fs.existsSync(DOWNLOAD_DIR)) {
     fs.mkdirSync(DOWNLOAD_DIR);
 }
+
+// Token map to track valid session tokens
+const validTokens = new Map();
 
 // Express server for webhook support
 const app = express();
@@ -31,8 +36,25 @@ app.get('/', (req, res) => {
     res.send('Terabox Downloader Bot is running');
 });
 
-// Add route for video player
+// Add route for video player with token verification
 app.get('/player', (req, res) => {
+    const token = req.query.token;
+    const isValidToken = token && validTokens.has(token);
+    
+    if (!isValidToken) {
+        return res.status(403).send('Access denied. This player can only be accessed from Telegram.');
+    }
+    
+    // Get session data
+    const sessionData = validTokens.get(token);
+    
+    // Check if token is expired (tokens valid for 1 hour)
+    if (Date.now() > sessionData.expires) {
+        validTokens.delete(token);
+        return res.status(403).send('Session expired. Please request a new link from the Telegram bot.');
+    }
+    
+    // Pass along the original query parameters
     res.sendFile(path.join(__dirname, 'player.html'));
 });
 
@@ -99,6 +121,25 @@ class TeraboxDownloader {
             "Files will be sent to you directly from the best available server.";
         
         this.bot.sendMessage(chatId, welcomeText);
+    }
+
+    // Generate a secure token for the video player session
+    generateSecureToken(chatId, downloadLink) {
+        const timestamp = Date.now();
+        const tokenData = `${chatId}-${timestamp}-${downloadLink}`;
+        const token = crypto.createHmac('sha256', SECRET_KEY)
+                           .update(tokenData)
+                           .digest('hex');
+        
+        // Store token with expiration (1 hour)
+        validTokens.set(token, {
+            chatId: chatId,
+            link: downloadLink,
+            created: timestamp,
+            expires: timestamp + (60 * 60 * 1000) // 1 hour expiration
+        });
+        
+        return token;
     }
 
     formatFileSize(sizeBytes) {
@@ -418,10 +459,14 @@ class TeraboxDownloader {
         return false;
     }
 
-    // Send video player with watch button
+    // Send video player with watch button - SECURED VERSION
     async sendVideoPlayerWithButton(chatId, statusMsgId, detailsMessage, downloadLink, fileName, fileSize, sourceProvider, seeuBotLink = null) {
-        // Create video player URL
+        // Generate secure token for this session
+        const token = this.generateSecureToken(chatId, downloadLink);
+        
+        // Create video player URL with token
         const playerUrl = new URL(`${HOST}/player`);
+        playerUrl.searchParams.append('token', token); // Add security token
         playerUrl.searchParams.append('url', downloadLink);
         playerUrl.searchParams.append('name', fileName);
         playerUrl.searchParams.append('size', fileSize);
@@ -646,8 +691,12 @@ class TeraboxDownloader {
                     const isVideo = videoExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
                     
                     if (isVideo) {
-                        // Create player URL
+                        // Generate secure token for this session
+                        const token = this.generateSecureToken(chatId, downloadLink);
+                        
+                        // Create player URL with token
                         const playerUrl = new URL(`${HOST}/player`);
+                        playerUrl.searchParams.append('token', token); // Add security token
                         playerUrl.searchParams.append('url', downloadLink);
                         playerUrl.searchParams.append('name', fileName);
                         playerUrl.searchParams.append('size', this.formatFileSize(fs.statSync(filePath).size));
@@ -710,7 +759,7 @@ bot.start();
 
 // Start Express server with explicit host binding
 const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running and listening on port ${PORT}`);
+   console.log(`Server is running and listening on port ${PORT}`);
 });
 
 // Add proper error handling for the server
@@ -720,3 +769,13 @@ server.on('error', (error) => {
         console.error(`Port ${PORT} is already in use`);
     }
 });
+
+// Clean up expired tokens periodically
+setInterval(() => {
+    const now = Date.now();
+    for (const [token, data] of validTokens.entries()) {
+        if (now > data.expires) {
+            validTokens.delete(token);
+        }
+    }
+}, 15 * 60 * 1000); // Run every 15 minutes
