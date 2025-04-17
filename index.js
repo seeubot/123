@@ -31,6 +31,11 @@ app.get('/', (req, res) => {
     res.send('Terabox Downloader Bot is running');
 });
 
+// Add route for video player
+app.get('/player', (req, res) => {
+    res.sendFile(path.join(__dirname, 'player.html'));
+});
+
 // Log the environment for debugging
 console.log(`Starting application with PORT=${PORT}, MODE=${DEPLOYMENT_MODE}`);
 
@@ -371,7 +376,7 @@ class TeraboxDownloader {
                     throw new Error(`Download failed: ${dlError.message}`);
                 }
             } else {
-                // Handle large file (>50MB)
+                // Handle large file (>100MB)
                 await this.handleLargeFileDownload(chatId, statusMsg.message_id, detailsMessage, fileDetails, downloadLink, originalUrl, serviceProvider);
             }
             
@@ -386,12 +391,12 @@ class TeraboxDownloader {
         }
     }
 
-    // Check if file is larger than 50MB
+    // Check if file is larger than 100MB (updated from 50MB)
     isLargeFile(fileDetails) {
         // Check for size in bytes
         if (fileDetails.sizebytes) {
             const size = Number(fileDetails.sizebytes);
-            if (!isNaN(size) && size >= 50 * 1024 * 1024) {
+            if (!isNaN(size) && size >= 100 * 1024 * 1024) {
                 return true;
             }
         }
@@ -399,12 +404,12 @@ class TeraboxDownloader {
         // Check for formatted size
         if (fileDetails.file_size && typeof fileDetails.file_size === 'string') {
             if (fileDetails.file_size.includes('GB')) {
-                return true; // Any GB file is definitely > 50MB
+                return true; // Any GB file is definitely > 100MB
             }
             
             if (fileDetails.file_size.includes('MB')) {
                 const sizeMB = parseFloat(fileDetails.file_size);
-                if (!isNaN(sizeMB) && sizeMB >= 50) {
+                if (!isNaN(sizeMB) && sizeMB >= 100) {
                     return true;
                 }
             }
@@ -413,10 +418,94 @@ class TeraboxDownloader {
         return false;
     }
 
+    // Send direct link with video player option
+    async sendVideoPlayerWithButton(chatId, statusMsgId, detailsMessage, downloadLink, fileName, fileSize, sourceProvider, seeuBotLink = null) {
+        // Create video player URL
+        const playerUrl = new URL(`${HOST}/player`);
+        playerUrl.searchParams.append('url', downloadLink);
+        playerUrl.searchParams.append('name', fileName);
+        playerUrl.searchParams.append('size', fileSize);
+        playerUrl.searchParams.append('source', sourceProvider);
+        
+        if (seeuBotLink && seeuBotLink !== downloadLink) {
+            playerUrl.searchParams.append('alt', seeuBotLink);
+        }
+        
+        // Prepare inline keyboard with player and download buttons
+        const inlineKeyboard = [];
+        
+        // Video player button
+        inlineKeyboard.push([{
+            text: '🎬 Watch Video',
+            url: playerUrl.toString()
+        }]);
+        
+        // Primary link button
+        inlineKeyboard.push([{
+            text: '📥 Download Link',
+            url: downloadLink
+        }]);
+        
+        // Add SEEUBOT link if available and different
+        if (seeuBotLink && seeuBotLink !== downloadLink) {
+            inlineKeyboard.push([{
+                text: '📥 Alternative Download Link',
+                url: seeuBotLink
+            }]);
+        }
+        
+        // Send message with buttons
+        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ Unable to download large file directly. You can watch online or use the download links:`, {
+            chat_id: chatId,
+            message_id: statusMsgId,
+            reply_markup: {
+                inline_keyboard: inlineKeyboard
+            }
+        });
+    }
+
+    // Modified to include video player option
+    async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, fileName, fileSize, sourceProvider, seeuBotLink = null) {
+        // Check if the file is a video based on extension
+        const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
+        const isVideo = videoExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
+        
+        if (isVideo) {
+            // Send video player option
+            await this.sendVideoPlayerWithButton(chatId, statusMsgId, detailsMessage, primaryLink, fileName, fileSize, sourceProvider, seeuBotLink);
+        } else {
+            // Original download button logic for non-video files
+            const inlineKeyboard = [];
+            
+            // Primary link button
+            inlineKeyboard.push([{
+                text: '📥 Download Link',
+                url: primaryLink
+            }]);
+            
+            // Add SEEUBOT link if available and different
+            if (seeuBotLink && seeuBotLink !== primaryLink) {
+                inlineKeyboard.push([{
+                    text: '📥 Alternative Download Link',
+                    url: seeuBotLink
+                }]);
+            }
+            
+            // Send message with buttons
+            await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ Unable to download large file directly. Use the download links below:`, {
+                chat_id: chatId,
+                message_id: statusMsgId,
+                reply_markup: {
+                    inline_keyboard: inlineKeyboard
+                }
+            });
+        }
+    }
+
     // Handle large file downloads with SEEUBOT fallback and direct link button
     async handleLargeFileDownload(chatId, statusMsgId, detailsMessage, fileDetails, downloadLink, originalUrl, serviceProvider) {
         // First, inform user about large file
-        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 50MB. Attempting download with SEEUBOT server...`, {
+        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ File is larger than 100MB. Attempting download with SEEUBOT server...`, {
             chat_id: chatId,
             message_id: statusMsgId
         });
@@ -463,45 +552,33 @@ class TeraboxDownloader {
                 }
                 
             } catch (seeuBotDownloadError) {
-                // If SEEUBOT download fails, offer direct link button
+                // If SEEUBOT download fails, offer direct link button with video player option if applicable
                 console.error('SEEUBOT download failed:', seeuBotDownloadError);
-                this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink, seeuBotLink);
+                this.sendDirectLinkWithButton(
+                    chatId, 
+                    statusMsgId, 
+                    detailsMessage, 
+                    downloadLink, 
+                    fileDetails.file_name, 
+                    this.formatFileSize(fileDetails.sizebytes || fileDetails.file_size), 
+                    serviceProvider, 
+                    seeuBotLink
+                );
             }
             
         } catch (seeuBotError) {
-            // If SEEUBOT fails, offer direct link button
+            // If SEEUBOT fails, offer direct link button with video player option if applicable
             console.error('SEEUBOT failed:', seeuBotError);
-            this.sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, downloadLink);
+            this.sendDirectLinkWithButton(
+                chatId, 
+                statusMsgId, 
+                detailsMessage, 
+                downloadLink, 
+                fileDetails.file_name, 
+                this.formatFileSize(fileDetails.sizebytes || fileDetails.file_size), 
+                serviceProvider
+            );
         }
-    }
-
-    // Send a message with direct download link button
-    async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, seeuBotLink = null) {
-        // Prepare inline keyboard with download buttons
-        const inlineKeyboard = [];
-        
-        // Primary link button
-        inlineKeyboard.push([{
-            text: '📥 Download Link',
-            url: primaryLink
-        }]);
-        
-        // Add SEEUBOT link if available and different
-        if (seeuBotLink && seeuBotLink !== primaryLink) {
-            inlineKeyboard.push([{
-                text: '📥 Alternative Download Link',
-                url: seeuBotLink
-            }]);
-        }
-        
-        // Send message with buttons
-        await this.bot.editMessageText(`${detailsMessage}\n\n⚠️ Unable to download large file directly. Use the download links below:`, {
-            chat_id: chatId,
-            message_id: statusMsgId,
-            reply_markup: {
-                inline_keyboard: inlineKeyboard
-            }
-        });
     }
 
     async downloadAndSendFile(chatId, downloadLink, fileName, statusMsgId, detailsMessage) {
