@@ -349,7 +349,7 @@ class TeraboxDownloader {
                 });
                 
                 try {
-                    const filePath = await this.downloadAndSendFile(chatId, downloadLink, fileDetails.file_name, statusMsg.message_id, detailsMessage);
+                    const filePath = await this.downloadAndSendFile(chatId, downloadLink, fileDetails.file_name, statusMsg.message_id, detailsMessage, originalUrl, serviceProvider, apiSource);
                     
                     // Send to dump channel if configured
                     if (DUMP_CHANNEL_ID) {
@@ -391,7 +391,7 @@ class TeraboxDownloader {
         }
     }
 
-    // Check if file is larger than 100MB (updated from 50MB)
+    // Check if file is larger than 100MB
     isLargeFile(fileDetails) {
         // Check for size in bytes
         if (fileDetails.sizebytes) {
@@ -418,7 +418,7 @@ class TeraboxDownloader {
         return false;
     }
 
-    // Send direct link with video player option
+    // Send video player with watch button
     async sendVideoPlayerWithButton(chatId, statusMsgId, detailsMessage, downloadLink, fileName, fileSize, sourceProvider, seeuBotLink = null) {
         // Create video player URL
         const playerUrl = new URL(`${HOST}/player`);
@@ -464,7 +464,7 @@ class TeraboxDownloader {
         });
     }
 
-    // Modified to include video player option
+    // Modified to include video player option for any size file
     async sendDirectLinkWithButton(chatId, statusMsgId, detailsMessage, primaryLink, fileName, fileSize, sourceProvider, seeuBotLink = null) {
         // Check if the file is a video based on extension
         const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
@@ -527,7 +527,7 @@ class TeraboxDownloader {
             
             try {
                 // Attempt the download
-                const filePath = await this.downloadAndSendFile(chatId, seeuBotLink, fileDetails.file_name, statusMsgId, detailsMessage);
+                const filePath = await this.downloadAndSendFile(chatId, seeuBotLink, fileDetails.file_name, statusMsgId, detailsMessage, originalUrl, serviceProvider, 'SEEUBOT');
                 
                 // Send to dump channel if configured
                 if (DUMP_CHANNEL_ID) {
@@ -581,7 +581,7 @@ class TeraboxDownloader {
         }
     }
 
-    async downloadAndSendFile(chatId, downloadLink, fileName, statusMsgId, detailsMessage) {
+    async downloadAndSendFile(chatId, downloadLink, fileName, statusMsgId, detailsMessage, originalUrl, serviceProvider, apiSource) {
         try {
             console.log(`Downloading from: ${downloadLink}`);
             
@@ -641,11 +641,38 @@ class TeraboxDownloader {
                         caption: `📁 File: ${fileName}`
                     });
                     
-                    // Update status message
-                    await this.bot.editMessageText(`${detailsMessage}\n\n✅ File sent successfully!`, {
-                        chat_id: chatId,
-                        message_id: statusMsgId
-                    });
+                    // Check if it's a video file
+                    const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg'];
+                    const isVideo = videoExtensions.some(ext => fileName.toLowerCase().endsWith(ext));
+                    
+                    if (isVideo) {
+                        // Create player URL
+                        const playerUrl = new URL(`${HOST}/player`);
+                        playerUrl.searchParams.append('url', downloadLink);
+                        playerUrl.searchParams.append('name', fileName);
+                        playerUrl.searchParams.append('size', this.formatFileSize(fs.statSync(filePath).size));
+                        playerUrl.searchParams.append('source', serviceProvider);
+                        
+                        // Update status message with watch button
+                        await this.bot.editMessageText(`${detailsMessage}\n\n✅ File sent successfully!`, {
+                            chat_id: chatId,
+                            message_id: statusMsgId,
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    {
+                                        text: '🎬 Watch Video',
+                                        url: playerUrl.toString()
+                                    }
+                                ]]
+                            }
+                        });
+                    } else {
+                        // For non-video files, just show success message
+                        await this.bot.editMessageText(`${detailsMessage}\n\n✅ File sent successfully!`, {
+                            chat_id: chatId,
+                            message_id: statusMsgId
+                        });
+                    }
                     
                     resolve(filePath);
                 });
