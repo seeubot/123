@@ -3,578 +3,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TeraBox Video Player</title>
-    
-    <!-- Plyr CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.css" />
-    
-    <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" />
-    
+    <title>TeraBox File Player</title>
     <style>
         body {
-            background-color: #121212;
-            color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
+            background-color: #121212;
+            color: #f0f0f0;
         }
-        
         .container {
-            max-width: 1200px;
+            max-width: 960px;
+            margin: 0 auto;
             padding: 20px;
         }
-        
-        .player-wrapper {
+        .player-container {
             position: relative;
-            background-color: #000;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            margin-bottom: 20px;
-            aspect-ratio: 16/9;
-        }
-        
-        .plyr {
-            --plyr-color-main: #e91e63;
-            --plyr-range-thumb-background: #e91e63;
-            --plyr-video-control-color: #fff;
-            --plyr-menu-background: rgba(28, 28, 28, 0.9);
-            --plyr-menu-color: #fff;
-            height: 100%;
             width: 100%;
-        }
-        
-        h1 {
-            font-size: 24px;
-            margin-bottom: 20px;
-            color: #e91e63;
-            word-break: break-word;
-        }
-        
-        .video-info {
-            background-color: #1e1e1e;
-            border-radius: 8px;
-            padding: 20px;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
             margin-bottom: 20px;
         }
-        
-        .video-details {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .video-detail-item {
-            background-color: #2d2d2d;
-            border-radius: 6px;
-            padding: 10px 15px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .video-detail-item i {
-            color: #e91e63;
-        }
-        
-        .dropdown-menu {
-            background-color: #1e1e1e;
-            border: 1px solid #333;
-        }
-        
-        .dropdown-item {
-            color: #fff;
-        }
-        
-        .dropdown-item:hover {
-            background-color: #2d2d2d;
-            color: #e91e63;
-        }
-        
-        .loader {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 50px;
-            height: 50px;
-            border: 5px solid #333;
-            border-radius: 50%;
-            border-top: 5px solid #e91e63;
-            animation: spin 1s linear infinite;
-            z-index: 5;
-        }
-        
-        @keyframes spin {
-            0% { transform: translate(-50%, -50%) rotate(0deg); }
-            100% { transform: translate(-50%, -50%) rotate(360deg); }
-        }
-        
-        #video-player {
-            width: 100%;
-            height: 100%;
-            max-height: 70vh;
-        }
-        
-        .error-message {
-            background-color: rgba(220, 53, 69, 0.2);
-            color: #ff6b6b;
-            border-left: 4px solid #dc3545;
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        
-        .player-controls {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .btn-group {
-            margin-right: 10px;
-        }
-        
-        .btn-custom {
-            background-color: #2d2d2d;
-            color: #fff;
-            border: none;
-        }
-        
-        .btn-custom:hover {
-            background-color: #e91e63;
-            color: #fff;
-        }
-        
-        .btn-primary {
-            background-color: #e91e63;
-            border-color: #e91e63;
-        }
-        
-        .btn-primary:hover {
-            background-color: #c2185b;
-            border-color: #c2185b;
-        }
-        
-        .quality-badge {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(233, 30, 99, 0.8);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 14px;
-            z-index: 10;
-        }
-        
-        .iframe-container {
+        #videoPlayer {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            z-index: 4;
-            display: none;
+            background: #000;
         }
-        
-        .iframe-container iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
+        .error-message {
+            padding: 20px;
+            background-color: #ff5252;
+            color: white;
+            border-radius: 5px;
+            text-align: center;
+            margin: 20px 0;
         }
-        
-        .try-methods {
-            margin-top: 20px;
+        .file-info {
+            background-color: #1e1e1e;
             padding: 15px;
-            background-color: rgba(52, 152, 219, 0.2);
-            border-left: 4px solid #3498db;
-            border-radius: 4px;
+            border-radius: 5px;
+            margin-bottom: 20px;
         }
-        
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
-            .player-wrapper {
-                max-height: 50vh;
-            }
-            
-            .player-controls {
-                justify-content: center;
-            }
-            
-            .btn-group {
-                margin-bottom: 10px;
-            }
+        .file-info p {
+            margin: 8px 0;
+        }
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .button {
+            background-color: #2962ff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
-    <div class="container mt-4">
-        <h1 id="video-title">Loading Video...</h1>
-        
-        <div class="player-wrapper">
-            <div id="loading" class="loader"></div>
-            <div class="quality-badge" id="quality-badge">MP4</div>
-            
-            <!-- Regular video player -->
-            <video id="video-player" playsinline controls>
-                <source id="video-source" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-            
-            <!-- Iframe fallback for problematic links -->
-            <div id="iframe-player" class="iframe-container"></div>
+    <div class="container">
+        <h1>TeraBox Player</h1>
+        <div id="authError" style="display: none;" class="error-message">
+            Access denied. This player can only be accessed through the Telegram bot.
         </div>
         
-        <div id="error-container" class="error-message" style="display: none;">
-            <p id="error-message">There was an error loading the video.</p>
-            <div id="try-methods" class="try-methods" style="display: none;">
-                <p><strong>Try Alternative Methods:</strong></p>
-                <div class="d-grid gap-2">
-                    <button id="try-direct" class="btn btn-custom">Method 1: Direct Player</button>
-                    <button id="try-iframe" class="btn btn-custom">Method 2: Iframe Player</button>
-                    <button id="try-cors" class="btn btn-custom">Method 3: CORS Proxy</button>
-                    <button id="try-alternative" class="btn btn-custom">Method 4: Alternative Source</button>
-                </div>
-            </div>
-        </div>
-        
-        <div class="player-controls">
-            <div>
-                <div class="btn-group" role="group">
-                    <button type="button" id="play-btn" class="btn btn-custom">
-                        <i class="fas fa-play"></i> Play
-                    </button>
-                    <button type="button" id="pause-btn" class="btn btn-custom">
-                        <i class="fas fa-pause"></i> Pause
-                    </button>
-                </div>
-                
-                <div class="btn-group" role="group">
-                    <button type="button" id="decrease-speed" class="btn btn-custom">
-                        <i class="fas fa-minus"></i> Speed
-                    </button>
-                    <button type="button" id="increase-speed" class="btn btn-custom">
-                        <i class="fas fa-plus"></i> Speed
-                    </button>
-                </div>
+        <div id="validContent" style="display: none;">
+            <div class="file-info">
+                <p id="fileName">Filename: Loading...</p>
+                <p id="fileSize">Size: Loading...</p>
+                <p id="source">Source: Loading...</p>
             </div>
             
-            <div class="dropdown">
-                <button class="btn btn-custom dropdown-toggle" type="button" id="qualityDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="fas fa-cog"></i> Source
-                </button>
-                <ul class="dropdown-menu" aria-labelledby="qualityDropdown" id="quality-options">
-                    <li><a class="dropdown-item" href="#" data-quality="primary">Primary Source</a></li>
-                    <li><a class="dropdown-item" href="#" data-quality="alternative">Alternative Source</a></li>
-                </ul>
+            <div class="player-container">
+                <video id="videoPlayer" controls autoplay>
+                    Your browser does not support the video tag.
+                </video>
             </div>
             
-            <a id="download-btn" href="#" class="btn btn-primary" download target="_blank">
-                <i class="fas fa-download"></i> Download Video
-            </a>
-        </div>
-        
-        <div class="video-info">
-            <h4>Video Information</h4>
-            <div class="video-details">
-                <div class="video-detail-item">
-                    <i class="fas fa-file"></i>
-                    <span id="video-name">Loading...</span>
-                </div>
-                <div class="video-detail-item">
-                    <i class="fas fa-weight"></i>
-                    <span id="video-size">Loading...</span>
-                </div>
-                <div class="video-detail-item">
-                    <i class="fas fa-server"></i>
-                    <span id="video-source">Loading...</span>
-                </div>
+            <div class="buttons">
+                <a id="downloadLink" class="button" href="#" target="_blank">Download File</a>
+                <a id="altDownloadLink" class="button" href="#" target="_blank" style="display: none;">Alternative Download</a>
             </div>
         </div>
     </div>
-    
-    <!-- Font Awesome -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
-    
-    <!-- Bootstrap and Popper.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    
-    <!-- Plyr JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js"></script>
-    
-    <!-- HLS.js for HLS streaming support -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.0/hls.min.js"></script>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Parse URL parameters
+            // Get URL parameters
             const urlParams = new URLSearchParams(window.location.search);
-            const videoUrl = urlParams.get('url');
-            const alternativeUrl = urlParams.get('alt');
-            const videoName = urlParams.get('name');
-            const videoSize = urlParams.get('size');
-            const videoSource = urlParams.get('source');
             
-            // Set video information
-            document.getElementById('video-title').innerText = videoName || 'Video Player';
-            document.getElementById('video-name').innerText = videoName || 'Unknown';
-            document.getElementById('video-size').innerText = videoSize || 'Unknown';
-            document.getElementById('video-source').innerText = videoSource || 'Unknown';
-            
-            // Select video elements
-            const video = document.getElementById('video-player');
-            const videoPlayerSource = document.getElementById('video-source');
-            const loading = document.getElementById('loading');
-            const errorContainer = document.getElementById('error-container');
-            const errorMessage = document.getElementById('error-message');
-            const downloadBtn = document.getElementById('download-btn');
-            const qualityOptions = document.getElementById('quality-options');
-            const qualityBadge = document.getElementById('quality-badge');
-            const iframePlayer = document.getElementById('iframe-player');
-            const tryMethods = document.getElementById('try-methods');
-            
-            // Track playing method
-            let currentMethod = 'direct';
-            let currentUrl = videoUrl;
-            let player = null;
-            let hls = null;
-            let loadAttempts = 0;
-            
-            // Set download link
-            downloadBtn.href = videoUrl;
-            
-            // Initialize the player with direct method
-            initializeDirectPlayer(videoUrl);
-            
-            // Method 1: Direct player
-            function initializeDirectPlayer(url) {
-                resetPlayer();
-                currentMethod = 'direct';
-                
-                // Show loading
-                loading.style.display = 'block';
-                video.style.display = 'block';
-                iframePlayer.style.display = 'none';
-                
-                // Set source
-                videoPlayerSource.src = url;
-                video.load();
-                
-                // Initialize Plyr
-                initPlyr();
-                
-                // Add error handling
-                video.onerror = function() {
-                    console.error('Video failed to load in direct mode');
-                    showError('Video failed to load. Trying alternative methods...', true);
-                };
+            // Check if token exists
+            const token = urlParams.get('token');
+            if (!token) {
+                showAuthError();
+                return;
             }
             
-            // Method 2: Iframe player
-            function initializeIframePlayer(url) {
-                resetPlayer();
-                currentMethod = 'iframe';
-                
-                // Show loading
-                loading.style.display = 'block';
-                video.style.display = 'none';
-                iframePlayer.style.display = 'block';
-                
-                // Create iframe
-                iframePlayer.innerHTML = `<iframe src="${url}" allowfullscreen></iframe>`;
-                
-                // Hide loading after a delay
-                setTimeout(() => {
-                    loading.style.display = 'none';
-                }, 2000);
+            // Token exists, proceed to load the player
+            const fileUrl = urlParams.get('url');
+            const fileName = urlParams.get('name');
+            const fileSize = urlParams.get('size');
+            const source = urlParams.get('source');
+            const altUrl = urlParams.get('alt');
+            
+            // Validate that we have required parameters
+            if (!fileUrl || !fileName) {
+                showAuthError("Missing required parameters");
+                return;
             }
             
-            // Method 3: CORS Proxy
-            function initializeProxyPlayer(url) {
-                resetPlayer();
-                currentMethod = 'proxy';
-                
-                // Show loading
-                loading.style.display = 'block';
-                video.style.display = 'block';
-                iframePlayer.style.display = 'none';
-                
-                // Try with CORS proxy
-                const corsProxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
-                
-                // Set source
-                videoPlayerSource.src = corsProxyUrl;
-                video.load();
-                
-                // Initialize Plyr
-                initPlyr();
-                
-                // Add error handling
-                video.onerror = function() {
-                    console.error('Video failed to load with CORS proxy');
-                    showError('Video failed to load with CORS proxy. Try the download link instead.', true);
-                };
-            }
+            // Everything looks good, show the content
+            document.getElementById('validContent').style.display = 'block';
             
-            // Initialize Plyr after video source is set
-            function initPlyr() {
-                if (player) {
-                    player.destroy();
-                }
-                
-                player = new Plyr('#video-player', {
-                    controls: [
-                        'play-large', 'play', 'progress', 'current-time', 'mute', 
-                        'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'
-                    ],
-                    settings: ['captions', 'quality', 'speed'],
-                    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
-                    keyboard: { focused: true, global: true },
-                    autoplay: false
-                });
-                
-                player.on('ready', function() {
-                    loading.style.display = 'none';
-                    errorContainer.style.display = 'none';
-                });
-                
-                player.on('error', function(event) {
-                    if (loadAttempts < 2) {
-                        // Try reloading once
-                        loadAttempts++;
-                        video.load();
-                        player.play().catch(err => console.error('Autoplay prevented:', err));
-                    } else {
-                        showError('Player error: The video might be unavailable or the format is not supported.', true);
-                    }
-                });
-            }
+            // Set file information
+            document.getElementById('fileName').textContent = `Filename: ${fileName}`;
+            document.getElementById('fileSize').textContent = `Size: ${fileSize || 'Unknown'}`;
+            document.getElementById('source').textContent = `Source: ${source || 'TeraBox'}`;
             
-            // Reset player state
-            function resetPlayer() {
-                if (player) {
-                    player.destroy();
-                    player = null;
-                }
-                if (hls) {
-                    hls.destroy();
-                    hls = null;
-                }
-                loadAttempts = 0;
-                errorContainer.style.display = 'none';
-            }
+            // Set video source
+            const videoPlayer = document.getElementById('videoPlayer');
+            videoPlayer.src = fileUrl;
             
-            // Show error message
-            function showError(message, showMethodOptions = false) {
-                loading.style.display = 'none';
-                errorContainer.style.display = 'block';
-                errorMessage.innerText = message;
-                
-                if (showMethodOptions) {
-                    tryMethods.style.display = 'block';
-                } else {
-                    tryMethods.style.display = 'none';
-                }
-            }
+            // Set download links
+            document.getElementById('downloadLink').href = fileUrl;
             
-            // Video player controls
-            document.getElementById('play-btn').addEventListener('click', function() {
-                if (currentMethod === 'direct' && player) {
-                    player.play();
-                }
-            });
-            
-            document.getElementById('pause-btn').addEventListener('click', function() {
-                if (currentMethod === 'direct' && player) {
-                    player.pause();
-                }
-            });
-            
-            document.getElementById('increase-speed').addEventListener('click', function() {
-                if (currentMethod === 'direct' && player) {
-                    let currentSpeed = player.speed;
-                    if (currentSpeed < 2) {
-                        player.speed = currentSpeed + 0.25;
-                    }
-                }
-            });
-            
-            document.getElementById('decrease-speed').addEventListener('click', function() {
-                if (currentMethod === 'direct' && player) {
-                    let currentSpeed = player.speed;
-                    if (currentSpeed > 0.5) {
-                        player.speed = currentSpeed - 0.25;
-                    }
-                }
-            });
-            
-            // Set up alternative playback methods
-            document.getElementById('try-direct').addEventListener('click', function() {
-                initializeDirectPlayer(currentUrl);
-            });
-            
-            document.getElementById('try-iframe').addEventListener('click', function() {
-                initializeIframePlayer(currentUrl);
-            });
-            
-            document.getElementById('try-cors').addEventListener('click', function() {
-                initializeProxyPlayer(currentUrl);
-            });
-            
-            document.getElementById('try-alternative').addEventListener('click', function() {
-                if (alternativeUrl) {
-                    currentUrl = alternativeUrl;
-                    downloadBtn.href = alternativeUrl;
-                    initializeDirectPlayer(alternativeUrl);
-                } else {
-                    showError('No alternative source available for this video.');
-                }
-            });
-            
-            // Set up quality options
-            if (alternativeUrl) {
-                document.querySelector('[data-quality="primary"]').addEventListener('click', function(e) {
-                    e.preventDefault();
-                    currentUrl = videoUrl;
-                    downloadBtn.href = videoUrl;
-                    
-                    if (currentMethod === 'direct') {
-                        initializeDirectPlayer(videoUrl);
-                    } else if (currentMethod === 'iframe') {
-                        initializeIframePlayer(videoUrl);
-                    } else if (currentMethod === 'proxy') {
-                        initializeProxyPlayer(videoUrl);
-                    }
-                });
-                
-                document.querySelector('[data-quality="alternative"]').addEventListener('click', function(e) {
-                    e.preventDefault();
-                    currentUrl = alternativeUrl;
-                    downloadBtn.href = alternativeUrl;
-                    
-                    if (currentMethod === 'direct') {
-                        initializeDirectPlayer(alternativeUrl);
-                    } else if (currentMethod === 'iframe') {
-                        initializeIframePlayer(alternativeUrl);
-                    } else if (currentMethod === 'proxy') {
-                        initializeProxyPlayer(alternativeUrl);
-                    }
-                });
-            } else {
-                // Hide alternative option if not available
-                document.querySelector('[data-quality="alternative"]').parentNode.style.display = 'none';
-            }
-            
-            // Check if we have valid URLs
-            if (!videoUrl) {
-                showError('No video URL provided.');
+            // Set alternative download link if available
+            if (altUrl) {
+                const altLink = document.getElementById('altDownloadLink');
+                altLink.style.display = 'inline-block';
+                altLink.href = altUrl;
             }
         });
+        
+        function showAuthError(message = "Access denied. This player can only be accessed through the Telegram bot.") {
+            document.getElementById('authError').textContent = message;
+            document.getElementById('authError').style.display = 'block';
+            document.getElementById('validContent').style.display = 'none';
+        }
     </script>
 </body>
 </html>
