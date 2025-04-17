@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Terabox Video Player</title>
+    <!-- Include Plyr for enhanced video controls -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -43,15 +45,12 @@
             width: 100%;
             padding-top: 56.25%; /* 16:9 Aspect Ratio */
         }
-        .video-container video {
+        .plyr {
             position: absolute;
             top: 0;
             left: 0;
-            bottom: 0;
-            right: 0;
             width: 100%;
             height: 100%;
-            object-fit: contain;
         }
         .file-info {
             background-color: #1a1a1a;
@@ -116,6 +115,16 @@
             height: 50px;
             animation: spin 1s linear infinite;
         }
+        .fallback-options {
+            background-color: #1a1a1a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            display: none;
+        }
+        .fallback-options h3 {
+            margin-top: 0;
+        }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -154,7 +163,7 @@
             <div class="loading" id="loadingIndicator">
                 <div class="loading-spinner"></div>
             </div>
-            <video id="videoPlayer" controls controlsList="nodownload">
+            <video id="videoPlayer" controls crossorigin playsinline>
                 <source id="videoSource" src="" type="video/mp4">
                 Your browser does not support the video tag.
             </video>
@@ -167,14 +176,29 @@
         <div class="controls">
             <a href="#" class="btn" id="downloadBtn" download>Download Video</a>
             <a href="#" class="btn btn-alt" id="altDownloadBtn" style="display: none;" download>Alternative Download</a>
-            <button class="btn" id="fullscreenBtn">Fullscreen</button>
+            <button class="btn" id="fallbackPlayerBtn">Try Fallback Player</button>
+        </div>
+        
+        <div class="fallback-options" id="fallbackOptions">
+            <h3>Advanced Options</h3>
+            <p>If the main player isn't working, try one of these alternatives:</p>
+            <div class="controls">
+                <button class="btn" id="hlsPlayerBtn">Try HLS Player</button>
+                <button class="btn" id="dashPlayerBtn">Try DASH Player</button>
+                <a href="#" class="btn" id="vlcLinkBtn">Open in VLC</a>
+            </div>
         </div>
     </div>
     
     <footer>
-        Terabox Downloader Bot | Video Player
+        Terabox Downloader Bot | Enhanced Video Player
     </footer>
 
+    <!-- Include necessary libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plyr/3.7.8/plyr.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.10/hls.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dashjs/4.7.1/dash.all.min.js"></script>
+    
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // Parse URL parameters
@@ -185,64 +209,232 @@
             const fileSource = urlParams.get('source');
             const altUrl = urlParams.get('alt');
             
-            // Update page with file information
-            document.getElementById('fileName').textContent = fileName || 'Unknown';
-            document.getElementById('fileSize').textContent = fileSize || 'Unknown';
-            document.getElementById('fileSource').textContent = fileSource || 'Terabox';
-            
-            // Set video source and download button
+            // Elements
             const videoPlayer = document.getElementById('videoPlayer');
             const videoSource = document.getElementById('videoSource');
             const downloadBtn = document.getElementById('downloadBtn');
             const altDownloadBtn = document.getElementById('altDownloadBtn');
             const loadingIndicator = document.getElementById('loadingIndicator');
             const errorMessage = document.getElementById('errorMessage');
-            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            const fallbackPlayerBtn = document.getElementById('fallbackPlayerBtn');
+            const fallbackOptions = document.getElementById('fallbackOptions');
+            const hlsPlayerBtn = document.getElementById('hlsPlayerBtn');
+            const dashPlayerBtn = document.getElementById('dashPlayerBtn');
+            const vlcLinkBtn = document.getElementById('vlcLinkBtn');
             
-            if (videoUrl) {
-                videoSource.src = videoUrl;
-                downloadBtn.href = videoUrl;
-                downloadBtn.setAttribute('download', fileName || 'terabox_video');
-                
-                // Set up alternative download if available
-                if (altUrl) {
-                    altDownloadBtn.href = altUrl;
-                    altDownloadBtn.setAttribute('download', fileName || 'terabox_video');
-                    altDownloadBtn.style.display = 'inline-block';
-                }
-                
-                // Load the video
-                videoPlayer.load();
-                
-                // Handle video load events
-                videoPlayer.addEventListener('loadeddata', function() {
-                    loadingIndicator.style.display = 'none';
-                });
-                
-                videoPlayer.addEventListener('error', function() {
-                    loadingIndicator.style.display = 'none';
-                    errorMessage.style.display = 'block';
-                    console.error('Video loading error');
-                });
-                
-                // Try to autoplay (may be blocked by browser policy)
-                videoPlayer.play().catch(function(error) {
-                    console.warn('Autoplay prevented:', error);
-                });
-            } else {
-                loadingIndicator.style.display = 'none';
-                errorMessage.style.display = 'block';
-                errorMessage.textContent = 'Error: No video URL provided';
+            // Update page with file information
+            document.getElementById('fileName').textContent = fileName || 'Unknown';
+            document.getElementById('fileSize').textContent = fileSize || 'Unknown';
+            document.getElementById('fileSource').textContent = fileSource || 'Terabox';
+            
+            // Fallback player button
+            fallbackPlayerBtn.addEventListener('click', function() {
+                fallbackOptions.style.display = fallbackOptions.style.display === 'none' ? 'block' : 'none';
+            });
+            
+            // Initialize Plyr
+            let player = null;
+            
+            // Set up alternative download if available
+            if (altUrl) {
+                altDownloadBtn.href = altUrl;
+                altDownloadBtn.setAttribute('download', fileName || 'terabox_video');
+                altDownloadBtn.style.display = 'inline-block';
             }
             
-            // Fullscreen button functionality
-            fullscreenBtn.addEventListener('click', function() {
-                if (videoPlayer.requestFullscreen) {
-                    videoPlayer.requestFullscreen();
-                } else if (videoPlayer.webkitRequestFullscreen) {
-                    videoPlayer.webkitRequestFullscreen();
-                } else if (videoPlayer.msRequestFullscreen) {
-                    videoPlayer.msRequestFullscreen();
+            // VLC link
+            if (videoUrl) {
+                vlcLinkBtn.href = `vlc://${videoUrl}`;
+            }
+            
+            // Main function to initialize video with given URL
+            function initializeVideo(url) {
+                if (!url) {
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.style.display = 'block';
+                    errorMessage.textContent = 'Error: No video URL provided';
+                    return;
+                }
+                
+                // Reset error state
+                errorMessage.style.display = 'none';
+                loadingIndicator.style.display = 'flex';
+                
+                // Set download links
+                downloadBtn.href = url;
+                downloadBtn.setAttribute('download', fileName || 'terabox_video');
+                
+                // Cleanup existing player if any
+                if (player) {
+                    player.destroy();
+                }
+                
+                // Check if it's an HLS stream (.m3u8)
+                if (url.includes('.m3u8')) {
+                    initializeHlsPlayer(url);
+                } 
+                // Check if it's a DASH stream (.mpd)
+                else if (url.includes('.mpd')) {
+                    initializeDashPlayer(url);
+                } 
+                // Regular video
+                else {
+                    videoSource.src = url;
+                    videoPlayer.load();
+                    
+                    // Initialize Plyr for regular video
+                    player = new Plyr(videoPlayer, {
+                        controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
+                        settings: ['captions', 'quality', 'speed', 'loop'],
+                        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+                        keyboard: { focused: true, global: true }
+                    });
+                    
+                    // Handle player events
+                    player.on('ready', event => {
+                        loadingIndicator.style.display = 'none';
+                    });
+                    
+                    player.on('error', event => {
+                        loadingIndicator.style.display = 'none';
+                        errorMessage.style.display = 'block';
+                        fallbackOptions.style.display = 'block';
+                        console.error('Player error:', event);
+                    });
+                    
+                    // Try to autoplay
+                    player.play().catch(error => {
+                        console.warn('Autoplay prevented:', error);
+                    });
+                }
+            }
+            
+            // HLS Player setup
+            function initializeHlsPlayer(url) {
+                if (Hls.isSupported()) {
+                    const hls = new Hls({
+                        xhrSetup: xhr => {
+                            xhr.withCredentials = true; // Try with credentials for CORS
+                        }
+                    });
+                    hls.loadSource(url);
+                    hls.attachMedia(videoPlayer);
+                    
+                    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                        loadingIndicator.style.display = 'none';
+                        
+                        // Initialize Plyr
+                        player = new Plyr(videoPlayer, {
+                            controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+                            settings: ['quality', 'speed'],
+                            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] }
+                        });
+                        
+                        player.play().catch(error => {
+                            console.warn('Autoplay prevented:', error);
+                        });
+                    });
+                    
+                    hls.on(Hls.Events.ERROR, function(event, data) {
+                        if (data.fatal) {
+                            loadingIndicator.style.display = 'none';
+                            errorMessage.style.display = 'block';
+                            fallbackOptions.style.display = 'block';
+                            console.error('HLS error:', data);
+                        }
+                    });
+                } else if (videoPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                    // For Safari and iOS devices that have built-in HLS support
+                    videoPlayer.src = url;
+                    videoPlayer.addEventListener('loadedmetadata', function() {
+                        loadingIndicator.style.display = 'none';
+                        
+                        player = new Plyr(videoPlayer, {
+                            controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen']
+                        });
+                        
+                        player.play().catch(error => {
+                            console.warn('Autoplay prevented:', error);
+                        });
+                    });
+                } else {
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.style.display = 'block';
+                    errorMessage.textContent = 'HLS playback not supported in this browser';
+                }
+            }
+            
+            // DASH Player setup
+            function initializeDashPlayer(url) {
+                const dashPlayer = dashjs.MediaPlayer().create();
+                dashPlayer.initialize(videoPlayer, url, true);
+                dashPlayer.updateSettings({
+                    streaming: {
+                        lowLatencyEnabled: false,
+                        abr: {
+                            autoSwitchBitrate: {
+                                audio: true,
+                                video: true
+                            }
+                        }
+                    }
+                });
+                
+                dashPlayer.on('playbackError', function(error) {
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.style.display = 'block';
+                    fallbackOptions.style.display = 'block';
+                    console.error('DASH playback error:', error);
+                });
+                
+                dashPlayer.on('manifestLoaded', function() {
+                    loadingIndicator.style.display = 'none';
+                    
+                    // Initialize Plyr with DASH
+                    player = new Plyr(videoPlayer, {
+                        controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen']
+                    });
+                });
+            }
+            
+            // Additional methods for handling different video formats
+            hlsPlayerBtn.addEventListener('click', function() {
+                initializeHlsPlayer(videoUrl); 
+            });
+            
+            dashPlayerBtn.addEventListener('click', function() {
+                initializeDashPlayer(videoUrl);
+            });
+            
+            // Start with default player
+            initializeVideo(videoUrl);
+            
+            // Direct video playback with elevated permissions (attempt to bypass CORS)
+            videoPlayer.addEventListener('loadeddata', function() {
+                loadingIndicator.style.display = 'none';
+                console.log('Video loaded successfully');
+            });
+            
+            // Check if video is working or stalled
+            let stallTimer;
+            videoPlayer.addEventListener('waiting', function() {
+                stallTimer = setTimeout(function() {
+                    // If video is stalled for more than 5 seconds, show fallback options
+                    if (videoPlayer.readyState < 3) {
+                        fallbackOptions.style.display = 'block';
+                    }
+                }, 5000);
+            });
+            
+            videoPlayer.addEventListener('playing', function() {
+                clearTimeout(stallTimer);
+            });
+            
+            // Handle network errors by suggesting alternative methods
+            window.addEventListener('online', function() {
+                if (errorMessage.style.display === 'block') {
+                    // Try again when network is back
+                    initializeVideo(videoUrl);
                 }
             });
         });
