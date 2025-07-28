@@ -206,7 +206,7 @@ class TeraboxDownloader {
         try {
             console.log(`Using SEEUBOT with URL: ${teraboxUrl}`);
             
-            const response = await axios.get(`https://wdzone-terabox-api.vercel.app/api?url=${encodeURIComponent(teraboxUrl)}`);
+            const response = await axios.get(`https://terabox-worker.robinkumarshakya103.workers.dev/api?url=${encodeURIComponent(teraboxUrl)}`);
             
             if (response.data["✅ Status"] !== "Success" || !response.data["📜 Extracted Info"]) {
                 throw new Error('Failed to get file details from SEEUBOT');
